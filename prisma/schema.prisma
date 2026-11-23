@@ -1,0 +1,245 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// =============================================================
+// READ-ONLY CRM REFERENCES (Unmanaged by HRM migrations)
+// =============================================================
+
+model User {
+  id            String       @id
+  name          String
+  email         String       @unique
+  passwordHash  String
+  empId         String?      @unique
+  alias         String?
+  isActive      Boolean      @default(true)
+  roleId        String
+  role          Role         @relation(fields: [roleId], references: [id])
+  designationId String?
+  designation   Designation? @relation(fields: [designationId], references: [id])
+
+  // HRM Native Relations
+  employeeShifts      EmployeeShift[]
+  attendanceRecords   AttendanceRecord[]
+  leaveRequests       LeaveRequest[]       @relation("EmployeeLeaves")
+  reviewedLeaves      LeaveRequest[]       @relation("ReviewedLeaves")
+  attendanceAuditLogs AttendanceAuditLog[] @relation("AdminAuditLogs")
+
+  @@map("users")
+}
+
+model Role {
+  id              String           @id
+  name            String           @unique
+  code            String           @unique
+  rolePermissions RolePermission[]
+  users           User[]
+
+  @@map("roles")
+}
+
+model Designation {
+  id    String @id
+  name  String @unique
+  code  String @unique
+  users User[]
+
+  @@map("designations")
+}
+
+model Permission {
+  id              String           @id
+  code            String           @unique
+  description     String
+  category        String
+  rolePermissions RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  id             String     @id
+  roleId         String
+  permissionCode String
+  isGranted      Boolean    @default(false)
+
+  role       Role       @relation(fields: [roleId], references: [id])
+  permission Permission @relation(fields: [permissionCode], references: [code])
+
+  @@unique([roleId, permissionCode])
+  @@map("role_permissions")
+}
+
+// =============================================================
+// HRM NATIVE MODELS (Managed by HRM migrations)
+// =============================================================
+
+enum ShiftCode {
+  SHIFT_1700
+  SHIFT_1730
+  SHIFT_1800
+  SHIFT_1830
+  SHIFT_1900
+  SHIFT_1930
+}
+
+enum AttendanceStatus {
+  IN_PROGRESS
+  P
+  HD
+  A
+  WO
+  LV
+}
+
+enum LeaveType {
+  CASUAL
+  SICK
+  PRIVILEGED
+}
+
+enum LeaveStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+model Shift {
+  id           String    @id @default(cuid())
+  code         ShiftCode @unique
+  displayName  String
+  startTime    String
+  durationMins Int       @default(510)
+  graceMinutes Int       @default(15)
+  isActive     Boolean   @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  employeeShifts    EmployeeShift[]
+  attendanceRecords AttendanceRecord[]
+
+  @@map("hrm_shifts")
+}
+
+model EmployeeShift {
+  id            String    @id @default(cuid())
+  userId        String
+  shiftId       String
+  effectiveFrom DateTime  @default(now())
+  effectiveTo   DateTime?
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shift Shift @relation(fields: [shiftId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, effectiveFrom])
+  @@map("hrm_employee_shifts")
+}
+
+model AttendanceRecord {
+  id                String           @id @default(cuid())
+  userId            String
+  shiftId           String?
+  workDate          String
+  firstPunchIn      DateTime
+  lastPunchOut      DateTime?
+  grossMinutes      Int              @default(0)
+  totalBreakMinutes Int              @default(0)
+  netWorkMinutes    Int              @default(0)
+  isLate            Boolean          @default(false)
+  lateMinutes       Int              @default(0)
+  status            AttendanceStatus @default(IN_PROGRESS)
+  isRegularized     Boolean          @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user      User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shift     Shift?               @relation(fields: [shiftId], references: [id])
+  breaks    BreakRecord[]
+  auditLogs AttendanceAuditLog[]
+
+  @@unique([userId, workDate])
+  @@index([workDate, status])
+  @@index([userId, status])
+  @@map("hrm_attendance_records")
+}
+
+model BreakRecord {
+  id                 String    @id @default(cuid())
+  attendanceRecordId String
+  breakStart         DateTime
+  breakEnd           DateTime?
+  durationMinutes    Int       @default(0)
+
+  attendanceRecord AttendanceRecord @relation(fields: [attendanceRecordId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([attendanceRecordId])
+  @@map("hrm_break_records")
+}
+
+model LeaveRequest {
+  id         String      @id @default(cuid())
+  userId     String
+  leaveType  LeaveType
+  startDate  String
+  endDate    String
+  totalDays  Int
+  reason     String
+  status     LeaveStatus @default(PENDING)
+  reviewedBy String?
+  reviewedAt DateTime?
+  adminNotes String?
+
+  user     User  @relation("EmployeeLeaves", fields: [userId], references: [id], onDelete: Cascade)
+  reviewer User? @relation("ReviewedLeaves", fields: [reviewedBy], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, status])
+  @@index([status])
+  @@map("hrm_leave_requests")
+}
+
+model Holiday {
+  id          String   @id @default(cuid())
+  date        String   @unique
+  name        String
+  description String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("hrm_holidays")
+}
+
+model AttendanceAuditLog {
+  id                 String   @id @default(cuid())
+  attendanceRecordId String
+  adminId            String
+  previousValues     Json
+  newValues          Json
+  reason             String
+  createdAt          DateTime @default(now())
+
+  attendanceRecord AttendanceRecord @relation(fields: [attendanceRecordId], references: [id], onDelete: Cascade)
+  admin            User             @relation("AdminAuditLogs", fields: [adminId], references: [id])
+
+  @@index([attendanceRecordId])
+  @@map("hrm_attendance_audit_logs")
+}
+

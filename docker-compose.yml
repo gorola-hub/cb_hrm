@@ -1,0 +1,17 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: cb_shared_db
+    restart: always
+    environment:
+      POSTGRES_USER: cb_user
+      POSTGRES_PASSWORD: cb_password
+      POSTGRES_DB: cb_crm
+    ports:
+      - "5432:5432"
+    volumes:
+      - cb_shared_db_data:/var/lib/postgresql/data
+
+volumes:
+  cb_shared_db_data:
+

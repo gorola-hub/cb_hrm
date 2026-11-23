@@ -10,9 +10,9 @@ All phase execution adheres to the **TDD Phase Format** specified in [TDD_INSTRU
 
 | Phase | Description | Status | Target Files |
 |---|---|:---:|---|
-| **Phase 0** | Repository Setup, Toolchain, Docker & Test Harness | **[ ] PENDING** | `package.json`, `tsconfig.json`, `docker-compose.yml`, `vitest.config.ts`, `prisma/schema.prisma`, `src/app/api/health/route.ts` |
-| **Phase 1** | Database Schema, HRM Migrations & Seed Harness | **[ ] PENDING** | `prisma/schema.prisma`, `prisma/migrations/`, `prisma/seed.ts`, `src/tests/db_connection.test.ts` |
-| **Phase 2** | Authentication & Shared Session Management | **[ ] PENDING** | `src/lib/auth.ts`, `src/service/auth.service.ts`, `src/app/api/auth/`, `src/components/auth/LoginForm.tsx` |
+| **Phase 0** | Repository Setup, Toolchain, Docker & Test Harness | **[x] COMPLETED** | `package.json`, `tsconfig.json`, `docker-compose.yml`, `vitest.config.ts`, `prisma/schema.prisma`, `src/app/api/health/route.ts` |
+| **Phase 1** | Database Schema, HRM Migrations & Seed Harness | **[x] COMPLETED** | `prisma/schema.prisma`, `prisma/migrations/`, `prisma/seed.ts`, `src/tests/db_connection.test.ts` |
+| **Phase 2** | Authentication & Shared Session Management | **[x] COMPLETED** | `src/lib/auth.ts`, `src/service/auth.service.ts`, `src/app/api/auth/`, `src/components/auth/LoginForm.tsx` |
 | **Phase 3** | IST Night-Shift Engine & Punch-In/Out Core | **[ ] PENDING** | `src/repository/attendance.repository.ts`, `src/service/attendance.service.ts`, `src/app/api/attendance/` |
 | **Phase 4** | Unlimited Break Engine & State Machine | **[ ] PENDING** | `src/repository/break.repository.ts`, `src/service/break.service.ts`, `src/app/api/attendance/break/` |
 | **Phase 5** | Employee Self-Service Dashboard & Calendar Grid | **[ ] PENDING** | `src/components/attendance/LiveClock.tsx`, `src/components/attendance/PunchCard.tsx`, `src/components/attendance/AttendanceCalendar.tsx`, `src/app/(portal)/dashboard/page.tsx` |
@@ -44,7 +44,7 @@ Capital Bridge HRM requires a fresh, fully configured Next.js 16 development env
 ### Phase 0 Checklist
 
 #### Step 0.1: Package Configuration & Dependency Installation
-- [ ] Initialize `package.json` with scripts:
+- [x] Initialize `package.json` with scripts:
   - `"dev": "next dev -p 3001"` (Isolated port)
   - `"build": "next build"`
   - `"start": "next start -p 3001"`
@@ -55,54 +55,144 @@ Capital Bridge HRM requires a fresh, fully configured Next.js 16 development env
   - `"db:generate": "prisma generate"`
   - `"db:migrate": "prisma migrate dev"`
   - `"db:seed": "tsx prisma/seed.ts"`
-- [ ] Install core dependencies: `next@16`, `react@19`, `react-dom@19`, `typescript`, `@prisma/client`, `prisma`, `next-auth@5`, `bcryptjs`, `date-fns`, `date-fns-tz`, `zod`, `lucide-react`, `tailwind-merge`, `clsx`.
-- [ ] Install dev dependencies: `vitest`, `@testing-library/react`, `jsdom`, `@vitejs/plugin-react`, `tsx`, `@types/bcryptjs`, `@types/node`, `@types/react`.
+- [x] Install core dependencies: `next@16`, `react@19`, `react-dom@19`, `typescript`, `@prisma/client`, `prisma`, `next-auth@5`, `bcryptjs`, `date-fns`, `date-fns-tz`, `zod`, `lucide-react`, `tailwind-merge`, `clsx`.
+- [x] Install dev dependencies: `vitest`, `@testing-library/react`, `jsdom`, `@vitejs/plugin-react`, `tsx`, `@types/bcryptjs`, `@types/node`, `@types/react`.
 
 #### Step 0.2: Local Docker & Environment Configuration
-- [ ] Create `docker-compose.yml` for local PostgreSQL 16 on port `5432` with shared database name `cb_crm`.
-- [ ] Create `.env.example` specifying `DATABASE_URL`, `NEXTAUTH_SECRET`, `NEXTAUTH_URL=http://localhost:3001`, and `SHARED_SSO_SECRET`.
-- [ ] Create `.env.test.example` with isolated test database configuration.
+- [x] Create `docker-compose.yml` for local PostgreSQL 16 on port `5432` with shared database name `cb_crm`.
+- [x] Create `.env.example` specifying `DATABASE_URL`, `NEXTAUTH_SECRET`, `NEXTAUTH_URL=http://localhost:3001`, and `SHARED_SSO_SECRET`.
+- [x] Create `.env.test.example` with isolated test database configuration.
 
 #### Step 0.3: Vitest Harness Configuration (RED State)
-- [ ] Create `vitest.config.ts` with React plugin, `jsdom` environment, and alias resolution for `@/*`.
-- [ ] Create test setup file `src/tests/setup.ts`.
-- [ ] **RED Test:** Create `src/tests/health.test.ts` asserting:
+- [x] Create `vitest.config.ts` with React plugin, `jsdom` environment, and alias resolution for `@/*`.
+- [x] Create test setup file `src/tests/setup.ts`.
+- [x] **RED Test:** Create `src/tests/health.test.ts` asserting:
   - `GET /api/health` returns status `200 OK`
   - Response body contains `{ status: "healthy", service: "cb_hrm", timestamp: expect.any(String) }`
-- [ ] Run `npm run test:run src/tests/health.test.ts` $\rightarrow$ **CONFIRM RED (File / route does not exist)**.
+- [x] Run `npm run test:run src/tests/health.test.ts` $\rightarrow$ **CONFIRM RED (File / route does not exist)**.
 
 #### Step 0.4: Health Check Endpoint Implementation (GREEN State)
-- [ ] Implement `src/app/api/health/route.ts` returning the standard health JSON envelope.
-- [ ] Re-run `npm run test:run src/tests/health.test.ts` $\rightarrow$ **CONFIRM GREEN**.
+- [x] Implement `src/app/api/health/route.ts` returning the standard health JSON envelope.
+- [x] Re-run `npm run test:run src/tests/health.test.ts` $\rightarrow$ **CONFIRM GREEN**.
 
 #### Step 0.5: Authoritative Prisma Schema Setup
-- [ ] Write `prisma/schema.prisma` with read-only CRM models (`User`, `Role`, `Designation`, `Permission`, `RolePermission`) and native `hrm_*` models.
-- [ ] Run `npx prisma generate` and verify Prisma client generation succeeds with 0 TypeScript errors.
-- [ ] Run full verification command: `npm run typecheck && npm run test:run` $\rightarrow$ All pass.
+- [x] Write `prisma/schema.prisma` with read-only CRM models (`User`, `Role`, `Designation`, `Permission`, `RolePermission`) and native `hrm_*` models.
+- [x] Run `npx prisma generate` and verify Prisma client generation succeeds with 0 TypeScript errors.
+- [x] Run full verification command: `npm run typecheck && npm run test:run` $\rightarrow$ All pass.
 
 #### Phase 0 Verification Chain
 Developer clones `cb_hrm` $\rightarrow$ Runs `npm install` $\rightarrow$ Copies `.env.example` to `.env` $\rightarrow$ Runs `docker compose up -d` $\rightarrow$ Runs `npx prisma generate` $\rightarrow$ Runs `npm run test:run` $\rightarrow$ Health test passes 100% $\rightarrow$ Runs `npm run dev` $\rightarrow$ Accesses `http://localhost:3001/api/health` in browser $\rightarrow$ Receives `{"status":"healthy","service":"cb_hrm"}` $\rightarrow$ ✅ Phase 0 Complete.
 
 ---
 
-## 3. High-Level Phase Specifications (Phases 1 through 10)
+## 3. Phase 1: Database Schema, HRM Migrations & Seed Harness (Full TDD Format)
 
-### Phase 1: Database Schema, HRM Migrations & Seed Harness
-- **Goal:** Apply `hrm_*` table migrations safely to the PostgreSQL database without modifying or dropping CRM tables. Create a resilient `seed.ts` script that works both on an existing CRM database and a fresh blank database.
-- **Target Files:** `prisma/schema.prisma`, `prisma/migrations/`, `prisma/seed.ts`, `src/tests/db_connection.test.ts`.
-- **Key Milestones:**
-  - Execute initial migration for `hrm_shifts`, `hrm_employee_shifts`, `hrm_attendance_records`, `hrm_break_records`, `hrm_leave_requests`, `hrm_holidays`, and `hrm_attendance_audit_logs`.
-  - Seed master shifts (`SHIFT_1700` through `SHIFT_1930`) with IST timings and grace periods.
-  - Implement integration test validating relational queries between `User` and `AttendanceRecord`.
+#### Root Cause
+HRM needs to deploy its native database models (`hrm_shifts`, `hrm_employee_shifts`, `hrm_attendance_records`, `hrm_break_records`, `hrm_leave_requests`, `hrm_holidays`, `hrm_attendance_audit_logs`) to the shared PostgreSQL instance without altering or dropping existing CRM tables (`users`, `roles`, etc.). Additionally, master data (the 6 standard IST shifts) must be seeded idempotently, and relational queries between CRM's `users` and HRM's `hrm_*` models must be verified via automated integration tests.
 
-### Phase 2: Authentication & Shared Session Management
-- **Goal:** Implement secure employee authentication against the CRM `users` table with password verification (bcrypt), inactive account protection, and role-based session hydration.
-- **Target Files:** `src/lib/auth.ts`, `src/service/auth.service.ts`, `src/app/api/auth/`, `src/components/auth/LoginForm.tsx`, `src/tests/auth.test.ts`.
-- **Key Milestones:**
-  - Implement `verifyCredentials` querying `users` by normalized email.
-  - Reject inactive accounts (`isActive = false`) with `AUTH_ACCOUNT_INACTIVE`.
-  - Build session callback populating `user.role.code` without referencing non-existent `systemRole`.
-  - Build polished login screen matching CB CRM visual styling.
+#### Target Files
+- `src/lib/prisma.ts` — Singleton PrismaClient instance
+- `src/tests/db_connection.test.ts` — Database integration test verifying table existence, foreign key relations, and user-to-shift queries
+- `prisma/migrations/` — Generated Prisma migration SQL strictly limited to `CREATE TABLE "hrm_*"` and associated indexes/enums
+- `prisma/seed.ts` — Idempotent seeding script for master shifts (`SHIFT_1700` through `SHIFT_1930`) and fallback test users
+
+---
+
+### Phase 1 Checklist
+
+#### Step 1.1: Singleton Prisma Client (`src/lib/prisma.ts`)
+- [x] Create `src/lib/prisma.ts` exporting a global singleton instance of `PrismaClient` to prevent connection pool exhaustion during development.
+
+#### Step 1.2: RED State Integration Test (`src/tests/db_connection.test.ts`)
+- [x] Write integration test `src/tests/db_connection.test.ts`:
+  - Test 1: Query `prisma.shift.findMany()` returning all 6 master shifts (`SHIFT_1700` through `SHIFT_1930`).
+  - Test 2: Relational query verifying `prisma.user.findFirst({ include: { employeeShifts: true, attendanceRecords: true, role: true } })` executes cleanly without column mismatch.
+  - Test 3: Verify CRM tables (`users`, `roles`, `permissions`) are readable without `systemRole` column errors.
+- [x] Run `npm run test:run src/tests/db_connection.test.ts` $\rightarrow$ **CONFIRM RED** (Tables/shifts do not exist yet in database).
+
+#### Step 1.3: Prisma Migration Generation & Deployment
+- [x] Generate and deploy migration for HRM tables ensuring 100% adherence to the Prisma Migration Isolation Rule:
+  - Generates ONLY `CREATE TABLE "hrm_*"` and enums (`ShiftCode`, `AttendanceStatus`, `LeaveType`, `LeaveStatus`).
+  - Contains zero alterations or drops targeting CRM tables (`users`, `roles`, etc.).
+- [x] Deploy migration to the shared database: `npx prisma db execute --schema prisma/schema.prisma --file prisma/migrations/20261124000000_init_hrm_tables/migration.sql` and record in `_prisma_migrations`.
+
+#### Step 1.4: Resilient & Idempotent Seed Harness (`prisma/seed.ts`)
+- [x] Implement `prisma/seed.ts`:
+  - Upsert the 6 master shifts from `CONTEXT/project_data.md`:
+    - `SHIFT_1700` (17:00 IST, duration 510m, grace 15m, label "17:00 - 01:30 IST")
+    - `SHIFT_1730` (17:30 IST, duration 510m, grace 15m, label "17:30 - 02:00 IST")
+    - `SHIFT_1800` (18:00 IST, duration 510m, grace 15m, label "18:00 - 02:30 IST")
+    - `SHIFT_1830` (18:30 IST, duration 510m, grace 15m, label "18:30 - 03:00 IST")
+    - `SHIFT_1900` (19:00 IST, duration 510m, grace 15m, label "19:00 - 03:30 IST")
+    - `SHIFT_1930` (19:30 IST, duration 510m, grace 15m, label "19:30 - 04:00 IST")
+  - If CRM `roles` or `users` don't exist (blank DB scenario), seed default roles (`ADMIN`, `BROKER`) and baseline test users (`admin@capitalbridgelogistics.com`, `broker@capitalbridgelogistics.com`). If they already exist, leave them untouched.
+- [x] Execute `npm run db:seed`.
+
+#### Step 1.5: GREEN State & Regression Verification
+- [x] Run `npm run test:run src/tests/db_connection.test.ts` $\rightarrow$ **CONFIRM GREEN**.
+- [x] Run full regression suite: `npm run typecheck && npm run test:run` $\rightarrow$ All pass.
+
+#### Phase 1 Verification Chain
+Developer runs `npm run db:migrate` $\rightarrow$ PostgreSQL creates `hrm_*` tables while preserving `users` $\rightarrow$ Developer runs `npm run db:seed` $\rightarrow$ 6 master shifts upserted $\rightarrow$ Developer runs `npm run test:run` $\rightarrow$ `src/tests/db_connection.test.ts` passes $\rightarrow$ Database contains active shifts and valid relational constraints between `users` and `hrm_*` $\rightarrow$ ✅ Phase 1 Complete.
+
+---
+
+## 4. Phase 2: Authentication & Shared Session Management (Full TDD Format)
+
+#### Root Cause
+Employees must authenticate in HRM using their CRM credentials verified via bcrypt against the shared PostgreSQL `users` table. Access must immediately be denied if an account is inactive (`isActive = false`) or password is invalid. User sessions must resolve their role via `user.role.code` and designation without querying a non-existent `systemRole` column.
+
+#### Target Files
+- `src/repository/auth.repository.ts` — User fetching with credentials, role, and designation
+- `src/service/auth.service.ts` — Bcrypt verification, status check, and user normalization
+- `src/lib/auth.ts` — NextAuth v5 session configuration and callbacks
+- `src/app/api/auth/[...nextauth]/route.ts` — NextAuth route handler
+- `src/app/api/auth/login/route.ts` — Dedicated authentication route returning standard error envelopes (`AUTH_INVALID_CREDENTIALS`, `AUTH_ACCOUNT_INACTIVE`)
+- `src/components/auth/LoginForm.tsx` & `src/app/login/page.tsx` — Styled login form matching CB CRM aesthetic
+- `src/tests/auth.test.ts` — Unit/integration tests covering `TS-AUTH-001`, `TS-AUTH-002`, `TS-AUTH-003`, `TS-AUTH-004`
+
+---
+
+### Phase 2 Checklist
+
+#### Step 2.1: RED State Test Creation (`src/tests/auth.test.ts`)
+- [x] Create `src/tests/auth.test.ts` implementing test cases:
+  - `TS-AUTH-001`: Valid credentials for active user return success and populated profile with `role.code`.
+  - `TS-AUTH-002`: Active credentials for inactive user (`isActive = false`) reject with `AUTH_ACCOUNT_INACTIVE`.
+  - `TS-AUTH-003`: Invalid password rejects with `AUTH_INVALID_CREDENTIALS`.
+  - `TS-AUTH-004`: Role and designation resolution succeeds with zero reference to `systemRole`.
+- [x] Run `npm run test:run src/tests/auth.test.ts` $\rightarrow$ **CONFIRM RED** (Modules do not exist).
+
+#### Step 2.2: Repository Layer Implementation (`src/repository/auth.repository.ts`)
+- [x] Implement `findUserWithCredentials(email: string)` querying `users` table including `role` and `designation`.
+- [x] Implement `findUserById(id: string)` for session verification.
+
+#### Step 2.3: Service Layer Implementation (`src/service/auth.service.ts`) & GREEN State
+- [x] Implement `verifyCredentials({ email, password })` in `src/service/auth.service.ts`:
+  - Case-insensitive email normalization.
+  - Verification of bcrypt password hash.
+  - Rejection if `isActive === false` with code `AUTH_ACCOUNT_INACTIVE`.
+  - Strip password hash before returning authenticated user payload.
+- [x] Re-run `npm run test:run src/tests/auth.test.ts` $\rightarrow$ **CONFIRM GREEN**.
+
+#### Step 2.4: NextAuth & API Route Handlers
+- [x] Configure `src/lib/auth.ts` with NextAuth v5 Credentials provider, jwt callback, and session callback populating `role` and `designation`.
+- [x] Implement `src/app/api/auth/[...nextauth]/route.ts`.
+- [x] Implement `src/app/api/auth/login/route.ts` accepting POST body, validating via Zod, and returning standard JSON response envelope.
+
+#### Step 2.5: Login Page & UI Components (`src/components/auth/LoginForm.tsx`, `src/app/login/page.tsx`)
+- [x] Build `LoginForm` component with email and password inputs, error alert display, and loading indicator.
+- [x] Build `/login` page with CB CRM slate visual styling and Capital Bridge branding.
+
+#### Step 2.6: Full Regression Run
+- [x] Run `npm run typecheck && npm run test:run` $\rightarrow$ All pass.
+
+#### Phase 2 Verification Chain
+Broker navigates to `/login` $\rightarrow$ Enters `broker@capitalbridgelogistics.com` and `Broker123!` $\rightarrow$ Submits form $\rightarrow$ API verifies credentials and active status $\rightarrow$ Session established with `role: { code: "BROKER" }` $\rightarrow$ User redirected to `/dashboard` $\rightarrow$ Attempting login with deactivated user returns 403 with `"Your account is deactivated in the CRM. Please contact your administrator."` $\rightarrow$ ✅ Phase 2 Complete.
+
+---
+
+## 5. High-Level Phase Specifications (Phases 3 through 10)
 
 ### Phase 3: IST Night-Shift Engine & Punch-In/Out Core
 - **Goal:** Core attendance recording engine anchored to Indian Standard Time (IST), managing `workDate` calendar anchoring, 120-minute early grace, 15-minute late tagging, and net work calculation.
