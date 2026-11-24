@@ -13,8 +13,8 @@ All phase execution adheres to the **TDD Phase Format** specified in [TDD_INSTRU
 | **Phase 0** | Repository Setup, Toolchain, Docker & Test Harness | **[x] COMPLETED** | `package.json`, `tsconfig.json`, `docker-compose.yml`, `vitest.config.ts`, `prisma/schema.prisma`, `src/app/api/health/route.ts` |
 | **Phase 1** | Database Schema, HRM Migrations & Seed Harness | **[x] COMPLETED** | `prisma/schema.prisma`, `prisma/migrations/`, `prisma/seed.ts`, `src/tests/db_connection.test.ts` |
 | **Phase 2** | Authentication & Shared Session Management | **[x] COMPLETED** | `src/lib/auth.ts`, `src/service/auth.service.ts`, `src/app/api/auth/`, `src/components/auth/LoginForm.tsx` |
-| **Phase 3** | IST Night-Shift Engine & Punch-In/Out Core | **[ ] PENDING** | `src/repository/attendance.repository.ts`, `src/service/attendance.service.ts`, `src/app/api/attendance/` |
-| **Phase 4** | Unlimited Break Engine & State Machine | **[ ] PENDING** | `src/repository/break.repository.ts`, `src/service/break.service.ts`, `src/app/api/attendance/break/` |
+| **Phase 3** | IST Night-Shift Engine & Punch-In/Out Core | **[x] COMPLETED** | `src/repository/attendance.repository.ts`, `src/service/attendance.service.ts`, `src/app/api/attendance/` |
+| **Phase 4** | Unlimited Break Engine & State Machine | **[x] COMPLETED** | `src/repository/break.repository.ts`, `src/service/break.service.ts`, `src/app/api/attendance/break/` |
 | **Phase 5** | Employee Self-Service Dashboard & Calendar Grid | **[ ] PENDING** | `src/components/attendance/LiveClock.tsx`, `src/components/attendance/PunchCard.tsx`, `src/components/attendance/AttendanceCalendar.tsx`, `src/app/(portal)/dashboard/page.tsx` |
 | **Phase 6** | Single Sign-On (SSO) Bridge to CRM *(Execute CRM Phase 30 first)* | **[ ] PENDING** | `src/service/sso.service.ts`, `src/app/api/auth/sso/token/route.ts`, `src/components/layout/Navbar.tsx` |
 | **Phase 7** | Leave Management & Admin Approval Workflow | **[ ] PENDING** | `src/repository/leave.repository.ts`, `src/service/leave.service.ts`, `src/app/api/leaves/`, `src/components/leaves/` |
@@ -192,24 +192,130 @@ Broker navigates to `/login` $\rightarrow$ Enters `broker@capitalbridgelogistics
 
 ---
 
-## 5. High-Level Phase Specifications (Phases 3 through 10)
+## 5. Phase 3: IST Night-Shift Engine & Punch-In/Out Core (Full TDD Format)
 
-### Phase 3: IST Night-Shift Engine & Punch-In/Out Core
-- **Goal:** Core attendance recording engine anchored to Indian Standard Time (IST), managing `workDate` calendar anchoring, 120-minute early grace, 15-minute late tagging, and net work calculation.
-- **Target Files:** `src/repository/attendance.repository.ts`, `src/service/attendance.service.ts`, `src/app/api/attendance/punch-in/route.ts`, `src/app/api/attendance/punch-out/route.ts`, `src/tests/attendance.test.ts`.
-- **Key Milestones:**
-  - Implement IST date calculations via `date-fns-tz`.
-  - Lock `workDate` to the first punch-in date for shifts crossing midnight.
-  - Enforce status thresholds on punch-out: $\ge 7.5\text{h} \rightarrow \text{P}$, $5.0\text{–}7.5\text{h} \rightarrow \text{HD}$, $< 5.0\text{h} \rightarrow \text{A}$.
-  - Enforce duplicate punch prevention (`@@unique([userId, workDate])`).
+#### Root Cause
+Capital Bridge operations run night shifts aligned with US freight brokerage trading hours (e.g., 19:00 to 03:30 IST). The system must anchor the shift's `workDate` permanently to the IST calendar date of first punch-in, allow punches up to 120 minutes early, tag tardiness beyond the 15-minute grace threshold, prevent duplicate punches for the same workDate, and evaluate net hours on punch-out against the status matrix ($\ge 7.5\text{h} \rightarrow \text{P}$, $5.0\text{–}7.5\text{h} \rightarrow \text{HD}$, $< 5.0\text{h} \rightarrow \text{A}$).
 
-### Phase 4: Unlimited Break Engine & State Machine
-- **Goal:** Interactive Finite State Machine allowing employees to take unlimited breaks throughout the shift, accumulating break minutes, and automatically closing active breaks on punch-out.
-- **Target Files:** `src/repository/break.repository.ts`, `src/service/break.service.ts`, `src/app/api/attendance/break/start/route.ts`, `src/app/api/attendance/break/end/route.ts`, `src/tests/break.test.ts`.
-- **Key Milestones:**
-  - Build atomic break transitions: `IDLE` $\rightarrow$ `WORKING` $\leftrightarrow$ `ON_BREAK` $\rightarrow$ `COMPLETED`.
-  - Implement `prisma.$transaction` for ending breaks and incrementing `totalBreakMinutes`.
-  - Implement auto-close handler when `punch-out` is triggered while in `ON_BREAK` state.
+#### Target Files
+- `src/lib/dateUtils.ts` — IST timezone conversion and shift threshold calculations
+- `src/repository/attendance.repository.ts` — Attendance database operations
+- `src/service/attendance.service.ts` — Punch-in/out business logic and status evaluation
+- `src/app/api/attendance/punch-in/route.ts` — Route handler for punch-in
+- `src/app/api/attendance/punch-out/route.ts` — Route handler for punch-out
+- `src/app/api/attendance/today/route.ts` — Route handler for fetching current active shift state
+- `src/tests/attendance.test.ts` — Service logic tests (`TS-ATT-001` .. `TS-ATT-004`, `TS-DATE-001`, `TS-CALC-001` .. `TS-CALC-003`)
+- `src/tests/attendanceRoute.test.ts` — Route handler tests
+
+---
+
+### Phase 3 Checklist
+
+#### Step 3.1: RED State Test Creation (`src/tests/attendance.test.ts`)
+- [x] Create `src/tests/attendance.test.ts` asserting:
+  - `TS-ATT-001`: On-time punch-in anchors `workDate` to current IST date, sets `isLate = false`, `lateMinutes = 0`, and `status = IN_PROGRESS`.
+  - `TS-ATT-002`: Early punch-in up to 120 minutes before shift succeeds with `isLate = false`.
+  - `TS-ATT-003`: Late punch-in beyond 15-minute grace marks `isLate = true` and records correct `lateMinutes`.
+  - `TS-ATT-004`: Duplicate punch-in for user with active shift returns `ATT_ALREADY_PUNCHED_IN`.
+  - `TS-DATE-001`: Cross-midnight shift retains original first punch-in IST date as `workDate`.
+  - `TS-CALC-001`: Punch-out with $\ge 450$ net minutes evaluates to status `P`.
+  - `TS-CALC-002`: Punch-out with $300\text{–}449$ net minutes evaluates to status `HD`.
+  - `TS-CALC-003`: Punch-out with $< 300$ net minutes evaluates to status `A`.
+- [x] Run `npm run test:run src/tests/attendance.test.ts` $\rightarrow$ **CONFIRM RED** (Modules do not exist).
+
+#### Step 3.2: IST Time & Date Utility (`src/lib/dateUtils.ts`)
+- [x] Implement `src/lib/dateUtils.ts`:
+  - `getISTDate(date?: Date): Date` (Converts UTC to `Asia/Kolkata` time)
+  - `getISTDateString(date?: Date): string` (Returns `"YYYY-MM-DD"` in IST)
+  - `parseShiftTimeToIST(workDate: string, timeStr: string): Date`
+  - `evaluateShiftTimeliness(punchInTime: Date, shiftStartTime: Date, graceMinutes: number, earlyLimitMinutes: number)`
+  - `evaluateAttendanceStatus(netWorkMinutes: number): AttendanceStatus`
+
+#### Step 3.3: Attendance Repository Layer (`src/repository/attendance.repository.ts`)
+- [x] Implement pure database queries:
+  - `findActiveAttendanceByUserId(userId: string)`
+  - `findAttendanceByUserIdAndWorkDate(userId: string, workDate: string)`
+  - `createAttendanceRecord(data: ...)`
+  - `closeAttendanceRecord(recordId: string, punchOutTime: Date, grossMinutes: number, netWorkMinutes: number, status: AttendanceStatus)`
+  - `getAssignedShiftForUser(userId: string)`
+
+#### Step 3.4: Attendance Service Layer (`src/service/attendance.service.ts`) & GREEN State
+- [x] Implement `punchIn(userId: string, punchTime?: Date)`
+- [x] Implement `punchOut(userId: string, punchTime?: Date)`
+- [x] Implement `getTodayShiftState(userId: string)`
+- [x] Re-run `npm run test:run src/tests/attendance.test.ts` $\rightarrow$ **CONFIRM GREEN**.
+
+#### Step 3.5: API Route Handlers (`src/app/api/attendance/`)
+- [x] Implement `POST /api/attendance/punch-in` with session verification.
+- [x] Implement `POST /api/attendance/punch-out` with session verification.
+- [x] Implement `GET /api/attendance/today` returning current attendance record or idle state.
+- [x] Implement `src/tests/attendanceRoute.test.ts` verifying HTTP status codes and error payloads.
+
+#### Step 3.6: Full Regression Run
+- [x] Run `npm run typecheck && npm run test:run` $\rightarrow$ All pass.
+
+#### Phase 3 Verification Chain
+Broker punches in at 18:55 IST on assigned 19:00 shift $\rightarrow$ System inserts `hrm_attendance_records` with `workDate = "2026-11-24"`, `isLate = false` $\rightarrow$ Shift crosses midnight to 03:30 IST next day $\rightarrow$ Broker punches out $\rightarrow$ Gross minutes = 515, Break = 0, Net = 515 $\rightarrow$ Status evaluates to `P` $\rightarrow$ `workDate` remains `"2026-11-24"` with no record on 2026-11-25 $\rightarrow$ ✅ Phase 3 Complete.
+
+---
+
+## 6. Phase 4: Unlimited Break Engine & State Machine (Full TDD Format)
+
+#### Root Cause
+Freight brokerage night shifts require a flexible, unconstrained break model (BR-BRK-001) rather than rigid schedules. Employees must be able to start and stop unlimited breaks throughout their active shift. When resuming work, the individual break duration must be finalized and added to the parent shift's `totalBreakMinutes`. If an employee punches out while actively on break, the system must atomically auto-close the open break at the punch-out timestamp inside a database transaction to prevent orphaned open records (BR-BRK-002, TS-BRK-004).
+
+#### Target Files
+- `src/repository/break.repository.ts` — Break database operations and transactions
+- `src/service/break.service.ts` — Break state machine and validation
+- `src/service/attendance.service.ts` — Updated `punchOut` integrating atomic break auto-close
+- `src/app/api/attendance/break/start/route.ts` — Route handler for `POST /api/attendance/break/start`
+- `src/app/api/attendance/break/end/route.ts` — Route handler for `POST /api/attendance/break/end`
+- `src/tests/break.test.ts` — Service layer and transactional tests (`TS-BRK-001` .. `TS-BRK-004`)
+- `src/tests/breakRoute.test.ts` — API route handler tests
+
+---
+
+### Phase 4 Checklist
+
+#### Step 4.1: RED State Test Creation (`src/tests/break.test.ts`)
+- [x] Create `src/tests/break.test.ts` asserting:
+  - `TS-BRK-001`: Starting break on active shift creates `BreakRecord` with `breakEnd = null` and state `ON_BREAK`.
+  - `TS-BRK-001b`: Reject starting break if already on break (`BRK_ALREADY_ON_BREAK`).
+  - `TS-BRK-001c`: Reject starting break if no active shift (`ATT_NO_ACTIVE_SHIFT`).
+  - `TS-BRK-002`: Resuming work ends active break, computes `durationMinutes`, and increments parent `totalBreakMinutes`.
+  - `TS-BRK-002b`: Reject resuming work if not on break (`BRK_NOT_ON_BREAK`).
+  - `TS-BRK-003`: Unlimited consecutive breaks: taking 4 distinct breaks records 4 rows and cumulative `totalBreakMinutes`.
+  - `TS-BRK-004`: Punch-out while on break auto-closes active break at punch-out timestamp in a transaction and finalizes net hours.
+- [x] Run `npm run test:run src/tests/break.test.ts` $\rightarrow$ **CONFIRM RED** (Modules do not exist).
+
+#### Step 4.2: Break Repository Layer (`src/repository/break.repository.ts`)
+- [x] Implement Prisma operations:
+  - `findActiveBreak(attendanceRecordId: string)`
+  - `createBreak(attendanceRecordId: string, breakStart: Date)`
+  - `closeBreakInTransaction(breakId: string, attendanceRecordId: string, breakEnd: Date, durationMinutes: number)`
+  - `getBreaksForAttendance(attendanceRecordId: string)`
+
+#### Step 4.3: Break Service Layer (`src/service/break.service.ts`) & GREEN State
+- [x] Implement `startBreak(userId: string, breakTime?: Date)`
+- [x] Implement `endBreak(userId: string, resumeTime?: Date)`
+- [x] Implement `getCurrentBreakState(userId: string)`
+- [x] Update `punchOut` in `src/service/attendance.service.ts` to detect and atomically auto-close any open break inside `prisma.$transaction`.
+- [x] Re-run `npm run test:run src/tests/break.test.ts` $\rightarrow$ **CONFIRM GREEN**.
+
+#### Step 4.4: API Route Handlers (`src/app/api/attendance/break/`)
+- [x] Implement `POST /api/attendance/break/start` with session guard.
+- [x] Implement `POST /api/attendance/break/end` with session guard.
+- [x] Implement `src/tests/breakRoute.test.ts` testing route error envelopes and success responses.
+
+#### Step 4.5: Full Regression Run
+- [x] Run `npm run typecheck && npm run test:run` $\rightarrow$ All pass.
+
+#### Phase 4 Verification Chain
+Broker punches in $\rightarrow$ State transitions to `WORKING` $\rightarrow$ Broker clicks [TAKE BREAK] $\rightarrow$ System creates open `BreakRecord` and state becomes `ON_BREAK` $\rightarrow$ Broker clicks [BACK FROM BREAK] after 20 mins $\rightarrow$ Break sealed with 20 mins duration, `totalBreakMinutes = 20` $\rightarrow$ Broker takes 2nd break and directly punches out $\rightarrow$ System executes Prisma transaction auto-closing 2nd break and calculating net shift hours $\rightarrow$ ✅ Phase 4 Complete.
+
+---
+
+## 7. High-Level Phase Specifications (Phases 5 through 10)
 
 ### Phase 5: Employee Self-Service Dashboard & Calendar Grid
 - **Goal:** The primary employee landing portal featuring the synchronized Live IST Digital Clock, interactive punch card, shift statistics, and monthly color-coded attendance calendar.
