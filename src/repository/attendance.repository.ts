@@ -100,3 +100,26 @@ export async function closeAttendanceRecord(
   });
 }
 
+export async function findMonthlyAttendanceByUserId(
+  userId: string,
+  startWorkDate: string,
+  endWorkDate: string
+) {
+  return prisma.attendanceRecord.findMany({
+    where: {
+      userId,
+      workDate: {
+        gte: startWorkDate,
+        lte: endWorkDate,
+      },
+    },
+    include: {
+      shift: true,
+      breaks: {
+        orderBy: { breakStart: 'asc' },
+      },
+    },
+    orderBy: { workDate: 'asc' },
+  });
+}
+

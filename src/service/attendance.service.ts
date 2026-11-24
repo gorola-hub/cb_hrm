@@ -4,6 +4,7 @@ import {
   getUserActiveShift,
   createAttendanceRecord,
   closeAttendanceRecord,
+  findMonthlyAttendanceByUserId,
 } from '@/repository/attendance.repository';
 import { findActiveBreakForAttendance } from '@/repository/break.repository';
 import { prisma } from '@/lib/prisma';
@@ -13,7 +14,7 @@ import {
   evaluateShiftTimeliness,
   evaluateAttendanceStatus,
 } from '@/lib/dateUtils';
-import { AttendanceRecord, Shift } from '@prisma/client';
+import { AttendanceRecord, Shift, BreakRecord, AttendanceStatus } from '@prisma/client';
 
 export type AttendanceResult =
   | {
@@ -218,5 +219,150 @@ export async function getTodayShiftState(userId: string) {
   return {
     state: 'IDLE',
     record: null,
+  };
+}
+
+export interface MonthDayAttendance {
+  date: string; // YYYY-MM-DD
+  dayNumber: number; // 1-31
+  dayOfWeek: string; // Sunday, Monday, etc.
+  isWeekend: boolean;
+  status: AttendanceStatus | 'WO' | null;
+  isLate: boolean;
+  lateMinutes: number;
+  grossMinutes: number;
+  totalBreakMinutes: number;
+  netWorkMinutes: number;
+  firstPunchIn: Date | null;
+  lastPunchOut: Date | null;
+  isRegularized: boolean;
+  shift?: Shift | null;
+  breaks?: BreakRecord[];
+}
+
+export interface MonthlyAttendanceSummary {
+  totalDays: number;
+  presentCount: number;
+  halfDayCount: number;
+  absentCount: number;
+  leaveCount: number;
+  weekOffCount: number;
+  lateCount: number;
+  totalNetMinutes: number;
+  totalGrossMinutes: number;
+}
+
+export interface MonthlyAttendanceResponse {
+  yearMonth: string;
+  days: MonthDayAttendance[];
+  summary: MonthlyAttendanceSummary;
+}
+
+/**
+ * Retrieves full monthly attendance calendar grid and KPI summary for an employee.
+ */
+export async function getMonthlyAttendance(
+  userId: string,
+  yearMonth: string
+): Promise<MonthlyAttendanceResponse> {
+  const [yearStr, monthStr] = yearMonth.split('-');
+  const year = parseInt(yearStr, 10);
+  const month = parseInt(monthStr, 10);
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+
+  const startWorkDate = `${yearStr}-${monthStr.padStart(2, '0')}-01`;
+  const endWorkDate = `${yearStr}-${monthStr.padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`;
+
+  const records = await findMonthlyAttendanceByUserId(userId, startWorkDate, endWorkDate);
+  const recordMap = new Map<string, (typeof records)[0]>();
+  for (const r of records) {
+    recordMap.set(r.workDate, r);
+  }
+
+  const todayIST = getISTDateString();
+  const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+  const days: MonthDayAttendance[] = [];
+  const summary: MonthlyAttendanceSummary = {
+    totalDays: daysInMonth,
+    presentCount: 0,
+    halfDayCount: 0,
+    absentCount: 0,
+    leaveCount: 0,
+    weekOffCount: 0,
+    lateCount: 0,
+    totalNetMinutes: 0,
+    totalGrossMinutes: 0,
+  };
+
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dateStr = `${yearStr}-${monthStr.padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    const dayDate = new Date(`${dateStr}T12:00:00.000Z`);
+    const dayOfWeekIndex = dayDate.getUTCDay();
+    const dayOfWeek = dayNames[dayOfWeekIndex];
+    const isWeekend = dayOfWeekIndex === 0 || dayOfWeekIndex === 6;
+
+    const existing = recordMap.get(dateStr);
+
+    if (existing) {
+      days.push({
+        date: dateStr,
+        dayNumber: day,
+        dayOfWeek,
+        isWeekend,
+        status: existing.status,
+        isLate: existing.isLate,
+        lateMinutes: existing.lateMinutes,
+        grossMinutes: existing.grossMinutes,
+        totalBreakMinutes: existing.totalBreakMinutes,
+        netWorkMinutes: existing.netWorkMinutes,
+        firstPunchIn: existing.firstPunchIn,
+        lastPunchOut: existing.lastPunchOut,
+        isRegularized: existing.isRegularized,
+        shift: existing.shift,
+        breaks: existing.breaks,
+      });
+
+      if (existing.status === 'P') summary.presentCount++;
+      else if (existing.status === 'HD') summary.halfDayCount++;
+      else if (existing.status === 'A') summary.absentCount++;
+      else if (existing.status === 'LV') summary.leaveCount++;
+      else if (existing.status === 'WO') summary.weekOffCount++;
+
+      if (existing.isLate) summary.lateCount++;
+      summary.totalNetMinutes += existing.netWorkMinutes;
+      summary.totalGrossMinutes += existing.grossMinutes;
+    } else {
+      let status: AttendanceStatus | 'WO' | null = null;
+      if (isWeekend) {
+        status = 'WO';
+        summary.weekOffCount++;
+      } else if (dateStr < todayIST) {
+        status = 'A';
+        summary.absentCount++;
+      }
+
+      days.push({
+        date: dateStr,
+        dayNumber: day,
+        dayOfWeek,
+        isWeekend,
+        status,
+        isLate: false,
+        lateMinutes: 0,
+        grossMinutes: 0,
+        totalBreakMinutes: 0,
+        netWorkMinutes: 0,
+        firstPunchIn: null,
+        lastPunchOut: null,
+        isRegularized: false,
+      });
+    }
+  }
+
+  return {
+    yearMonth,
+    days,
+    summary,
   };
 }

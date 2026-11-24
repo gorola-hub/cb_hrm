@@ -15,7 +15,7 @@ All phase execution adheres to the **TDD Phase Format** specified in [TDD_INSTRU
 | **Phase 2** | Authentication & Shared Session Management | **[x] COMPLETED** | `src/lib/auth.ts`, `src/service/auth.service.ts`, `src/app/api/auth/`, `src/components/auth/LoginForm.tsx` |
 | **Phase 3** | IST Night-Shift Engine & Punch-In/Out Core | **[x] COMPLETED** | `src/repository/attendance.repository.ts`, `src/service/attendance.service.ts`, `src/app/api/attendance/` |
 | **Phase 4** | Unlimited Break Engine & State Machine | **[x] COMPLETED** | `src/repository/break.repository.ts`, `src/service/break.service.ts`, `src/app/api/attendance/break/` |
-| **Phase 5** | Employee Self-Service Dashboard & Calendar Grid | **[ ] PENDING** | `src/components/attendance/LiveClock.tsx`, `src/components/attendance/PunchCard.tsx`, `src/components/attendance/AttendanceCalendar.tsx`, `src/app/(portal)/dashboard/page.tsx` |
+| **Phase 5** | Employee Self-Service Dashboard & Calendar Grid | **[x] COMPLETED** | `src/components/attendance/LiveClock.tsx`, `src/components/attendance/PunchCard.tsx`, `src/components/attendance/AttendanceCalendar.tsx`, `src/app/(portal)/dashboard/page.tsx` |
 | **Phase 6** | Single Sign-On (SSO) Bridge to CRM *(Execute CRM Phase 30 first)* | **[ ] PENDING** | `src/service/sso.service.ts`, `src/app/api/auth/sso/token/route.ts`, `src/components/layout/Navbar.tsx` |
 | **Phase 7** | Leave Management & Admin Approval Workflow | **[ ] PENDING** | `src/repository/leave.repository.ts`, `src/service/leave.service.ts`, `src/app/api/leaves/`, `src/components/leaves/` |
 | **Phase 8** | Admin Attendance Command Center & Regularization | **[ ] PENDING** | `src/repository/adminAttendance.repository.ts`, `src/service/adminAttendance.service.ts`, `src/app/(admin)/admin/attendance/page.tsx` |
@@ -315,16 +315,104 @@ Broker punches in $\rightarrow$ State transitions to `WORKING` $\rightarrow$ Bro
 
 ---
 
-## 7. High-Level Phase Specifications (Phases 5 through 10)
+## 7. Phase 5: Employee Self-Service Dashboard & Calendar Grid (Full TDD Format)
 
-### Phase 5: Employee Self-Service Dashboard & Calendar Grid
-- **Goal:** The primary employee landing portal featuring the synchronized Live IST Digital Clock, interactive punch card, shift statistics, and monthly color-coded attendance calendar.
-- **Target Files:** `src/components/attendance/LiveClock.tsx`, `src/components/attendance/PunchCard.tsx`, `src/components/attendance/AttendanceCalendar.tsx`, `src/components/attendance/DayDetailModal.tsx`, `src/app/(portal)/dashboard/page.tsx`.
-- **Key Milestones:**
-  - Real-time client clock with zero drift and tabular numeric display.
-  - Optimistic UI transitions on punch-in, take break, resume, and punch-out.
-  - Interactive monthly calendar grid displaying badges (`P`, `HD`, `A`, `LV`, `WO`, `L`).
-  - Day Detail Modal revealing itemized break timeline.
+#### Root Cause
+Employees require a centralized, real-time self-service portal to monitor their live IST shift timers, perform one-click shift actions (punch in, unlimited breaks, resume work, punch out) with instant optimistic UI feedback (NFR-UX-001, NFR-UX-002), and inspect their monthly attendance calendar with color-coded daily badges (`P`, `HD`, `A`, `LV`, `WO`, `L`) and itemized break audit trails (FR-ATT-001, FR-ATT-006, Rule BR-ATT-002).
+
+#### Target Files
+- `src/repository/attendance.repository.ts` — Query user monthly attendance records with associated shift and break details
+- `src/service/attendance.service.ts` — Compute complete monthly calendar matrix, map weekends to `WO` (when no punch exists), evaluate monthly KPI aggregates (present, half-day, absent, leave, week-off, late count)
+- `src/app/api/attendance/monthly/route.ts` — API endpoint `GET /api/attendance/monthly?month=YYYY-MM` with session verification and Zod validation
+- `src/tests/monthlyAttendance.test.ts` — Service logic tests for monthly history generation and weekend status mapping
+- `src/tests/monthlyAttendanceRoute.test.ts` — Route handler tests for `GET /api/attendance/monthly`
+- `src/components/layout/Navbar.tsx` — Navigation header with user identity, role badge, live clock sync, and logout action
+- `src/components/attendance/LiveClock.tsx` — Synchronized IST digital clock with drift compensation (<500ms) and tabular monospace font
+- `src/components/attendance/PunchCard.tsx` — Dynamic interactive punch card handling FSM states (`IDLE`, `WORKING`, `ON_BREAK`, `COMPLETED`), action buttons, live timers, and optimistic transitions
+- `src/components/attendance/DayDetailModal.tsx` — Modal displaying comprehensive day shift metrics, IST timestamps, gross/net working minutes, tardiness, and itemized break timeline
+- `src/components/attendance/AttendanceCalendar.tsx` — Interactive monthly calendar grid with month navigation, status badges (`P`, `HD`, `A`, `LV`, `WO`, `L`), summary KPI statistics, and day click inspection
+- `src/app/(portal)/layout.tsx` — Portal shell enforcing authentication and providing shared layout
+- `src/app/(portal)/dashboard/page.tsx` — Unified self-service dashboard page assembling LiveClock, PunchCard, and AttendanceCalendar
+
+---
+
+### Phase 5 Checklist
+
+#### Step 5.1: RED State Test Creation for Monthly Attendance Service (`src/tests/monthlyAttendance.test.ts`)
+- [x] Create `src/tests/monthlyAttendance.test.ts`:
+  - Test 1: Given a user with attendance records in a month, `getMonthlyAttendance(userId, '2026-11')` returns all days of the month with populated attendance data for punched days.
+  - Test 2: Unworked Saturday and Sunday dates default to status `WO` (Week Off) per Rule BR-ATT-002.
+  - Test 3: Past unworked weekdays without punch or approved leave default to `A` (Absent).
+  - Test 4: Accurate aggregation of monthly KPI counters: total working days, `presentCount`, `halfDayCount`, `absentCount`, `leaveCount`, `weekOffCount`, `lateCount`, `totalNetHours`.
+- [x] Run `npm run test:run src/tests/monthlyAttendance.test.ts` $\rightarrow$ **CONFIRM RED** (Function does not exist).
+
+#### Step 5.2: Repository & Service Implementation for Monthly Attendance (`src/repository/attendance.repository.ts`, `src/service/attendance.service.ts`) & GREEN State
+- [x] In `src/repository/attendance.repository.ts`, implement `findMonthlyAttendanceByUserId(userId: string, startWorkDate: string, endWorkDate: string)` fetching records with shifts and breaks ordered by `workDate`.
+- [x] In `src/service/attendance.service.ts`, implement `getMonthlyAttendance(userId: string, yearMonth: string)`:
+  - Generate full calendar day sequence for the requested month.
+  - Match existing attendance records.
+  - Assign `WO` for unworked weekends (Saturday/Sunday).
+  - Calculate summary metrics (`presentCount`, `halfDayCount`, `absentCount`, `leaveCount`, `weekOffCount`, `lateCount`, `totalNetMinutes`).
+- [x] Re-run `npm run test:run src/tests/monthlyAttendance.test.ts` $\rightarrow$ **CONFIRM GREEN**.
+
+#### Step 5.3: Monthly Attendance API Route Handler (`src/app/api/attendance/monthly/route.ts`)
+- [x] Create `src/tests/monthlyAttendanceRoute.test.ts`:
+  - Test 1: Unauthenticated request returns 401 Unauthorized.
+  - Test 2: Invalid month format (e.g. `month=invalid`) returns 400 Bad Request.
+  - Test 3: Authenticated request returns 200 OK with month records and summary metrics.
+- [x] Run `npm run test:run src/tests/monthlyAttendanceRoute.test.ts` $\rightarrow$ **CONFIRM RED**.
+- [x] Implement `GET /api/attendance/monthly` route handler with NextAuth session validation and query parameter validation (`yearMonth` regex `^\d{4}-\d{2}$`).
+- [x] Re-run `npm run test:run src/tests/monthlyAttendanceRoute.test.ts` $\rightarrow$ **CONFIRM GREEN**.
+
+#### Step 5.4: LiveClock Component (`src/components/attendance/LiveClock.tsx`)
+- [x] Build `LiveClock` component:
+  - Synchronizes with server timestamp on mount to prevent client OS clock tampering (NFR-PERF-001, drift <500ms).
+  - Displays IST time in 24-hour format with seconds (`HH:mm:ss IST`).
+  - Displays IST day, date, and month (e.g., `Tuesday, 24 November 2026`).
+  - Monospace tabular numeric styling (`tabular-nums font-mono`) to prevent layout jitter.
+
+#### Step 5.5: Interactive PunchCard Component (`src/components/attendance/PunchCard.tsx`)
+- [x] Build `PunchCard` component handling FSM states with optimistic updates (NFR-UX-001):
+  - `IDLE`: Displays shift schedule, [PUNCH IN] primary button.
+  - `WORKING`: Displays live shift elapsed timer, [TAKE BREAK] button, and [PUNCH OUT] button.
+  - `ON_BREAK`: Displays active break timer, [BACK FROM BREAK] button, and [PUNCH OUT] button.
+  - `COMPLETED`: Displays shift recap (Punch In, Punch Out, Total Break, Net Hours, Status Badge).
+  - Integrates with `/api/attendance/today`, `/api/attendance/punch-in`, `/api/attendance/punch-out`, `/api/attendance/break/start`, `/api/attendance/break/end`.
+  - Color-coded badges per Rule BR-ATT-002 (Emerald `P`, Amber `HD`, Rose `A`, Blue animated `IN_PROGRESS`).
+
+#### Step 5.6: DayDetailModal & AttendanceCalendar Components (`src/components/attendance/DayDetailModal.tsx`, `src/components/attendance/AttendanceCalendar.tsx`)
+- [x] Build `DayDetailModal` component:
+  - Displays selected work date, assigned shift name, first punch in, last punch out in IST.
+  - Displays gross duration, total break duration, net working duration.
+  - Shows tardiness badge if `isLate = true` with `lateMinutes`.
+  - Itemized timeline of all breaks taken (Break #, start, end, duration).
+- [x] Build `AttendanceCalendar` component:
+  - Header with month/year navigation (prev/next month).
+  - KPI statistic cards (Present, Half Day, Absent, Leave, Week Off, Late).
+  - 7-column calendar grid (Mon-Sun) displaying day numbers, status badges (`P`, `HD`, `A`, `LV`, `WO`, `L`).
+  - Clickable day cards opening `DayDetailModal`.
+
+#### Step 5.7: Portal Layout, Navbar & Dashboard Page (`src/components/layout/Navbar.tsx`, `src/app/(portal)/layout.tsx`, `src/app/(portal)/dashboard/page.tsx`)
+- [x] Implement `src/components/layout/Navbar.tsx`:
+  - Capital Bridge logo & branding.
+  - User name, role badge (`user.role.code`), designation.
+  - Sign Out button calling NextAuth `signOut()`.
+- [x] Implement `src/app/(portal)/layout.tsx`:
+  - Session verification; redirects unauthenticated users to `/login`.
+  - Renders Navbar and responsive container.
+- [x] Implement `src/app/(portal)/dashboard/page.tsx`:
+  - Assembles `LiveClock`, `PunchCard`, and `AttendanceCalendar`.
+- [x] Update root route `src/app/page.tsx` or redirects so authenticated users land on `/dashboard`.
+
+#### Step 5.8: Full Regression Verification
+- [x] Run `npm run typecheck && npm run test:run` ensuring 100% test pass rate across all suites.
+
+#### Phase 5 Verification Chain
+Employee logs in at `/login` $\rightarrow$ Redirected to `/dashboard` $\rightarrow$ Live IST clock updates every second with server-synced time $\rightarrow$ PunchCard displays assigned shift schedule $\rightarrow$ Clicks [PUNCH IN] $\rightarrow$ UI optimistically transitions to WORKING with live shift counter running $\rightarrow$ Clicks [TAKE BREAK] $\rightarrow$ UI transitions to ON_BREAK with break timer running $\rightarrow$ Clicks [BACK FROM BREAK] $\rightarrow$ UI transitions back to WORKING $\rightarrow$ Clicks [PUNCH OUT] $\rightarrow$ UI transitions to COMPLETED displaying status badge (`P`/`HD`/`A`) $\rightarrow$ Attendance calendar below updates to show today's status badge $\rightarrow$ Clicking the day cell opens `DayDetailModal` with the itemized break breakdown $\rightarrow$ ✅ Phase 5 Complete.
+
+---
+
+## 8. High-Level Phase Specifications (Phases 6 through 10)
 
 ### Phase 6: Single Sign-On (SSO) Bridge to CRM
 
