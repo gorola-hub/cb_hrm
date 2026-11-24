@@ -55,16 +55,52 @@ To ensure Railway **only** deploys code after GitHub Actions CI checks (linting,
 ### Step 4: Configure Service Environment Variables
 In the `cb_hrm` service $\rightarrow$ Navigate to **Variables** $\rightarrow$ Add:
 
-| Variable Name | Value / Source | Description |
-|---|---|---|
-| `DATABASE_URL` | `${{cb_crm_db.DATABASE_URL}}` (or private connection string) | Internal Railway private connection to shared DB |
-| `NEXTAUTH_URL` | `https://hrm.capitalbridgelogistics.com` | Production canonical URL for NextAuth |
-| `NEXTAUTH_SECRET` | 32+ character random secret string | Encryption key for session cookies |
-| `SHARED_SSO_SECRET`| Must match `SHARED_SSO_SECRET` in `cb_crm` | Shared secret for HMAC-SHA256 SSO bridge |
-| `NODE_ENV` | `production` | Production environment flag |
-| `PORT` | `3001` (or Railway default `$PORT`) | Web server port |
+| Variable Name | Value / Source | Synchronization Requirement | Description |
+|---|---|---|---|
+| `DATABASE_URL` | `${{cb_crm_db.DATABASE_URL}}` (or private connection string) | **MUST BE IDENTICAL** to `cb_crm` | Internal Railway private connection to shared DB |
+| `SHARED_SSO_SECRET`| 32+ character HMAC-SHA256 secret string | **MUST BE IDENTICAL** to `cb_crm` | Shared secret for HMAC-SHA256 SSO bridge |
+| `CRM_BASE_URL` | `https://crm.capitalbridgelogistics.com` | Points to `cb_crm` | CRM service URL for SSO tokens and SLO redirects |
+| `NEXT_PUBLIC_CRM_URL` | `https://crm.capitalbridgelogistics.com` | Points to `cb_crm` | Public client URL for Open CRM navbar button & logout |
+| `NEXTAUTH_URL` | `https://hrm.capitalbridgelogistics.com` | Independent to HRM | Production canonical URL for NextAuth |
+| `NEXTAUTH_SECRET` | 32+ character random secret string | Independent to HRM | Encryption key for HRM session cookies |
+| `NODE_ENV` | `production` | Standard | Production environment flag |
+| `PORT` | `3001` (or Railway default `$PORT`) | Standard | Web server port |
 
-### Step 5: Configure Custom Domain
+---
+
+### Cross-Service Shared Variables Contract
+
+1. **`DATABASE_URL` (Exact Match Required):**
+   - Both `cb_crm` and `cb_hrm` connect to the exact same PostgreSQL database instance (`cb_crm_db`).
+   - HRM authenticates users against the `users` table created and seeded by CRM. If the database strings do not point to the exact same database, users will not be found.
+
+2. **`SHARED_SSO_SECRET` (Exact Match Required):**
+   - HRM cryptographically signs a 60-second inbound SSO token with HMAC-SHA256 when an employee clicks "Open CRM".
+   - CRM verifies this signature using the same secret. Both environments must have the exact same character sequence.
+
+#### Token & Secret Generation Commands
+To generate a secure 32-byte secret for `SHARED_SSO_SECRET` or `NEXTAUTH_SECRET`:
+
+```bash
+# Using OpenSSL (macOS / Linux):
+openssl rand -hex 32
+
+# Using Node.js (Universal):
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+---
+
+### Step 5: Configure Build & Deploy Settings (Railway Dashboard)
+
+In the `cb_hrm` service $\rightarrow$ **Settings** tab, configure:
+- **Builder**: `Railpack`
+- **Build Command**: `npx prisma generate && npm run build`
+- **Start Command**: `npm run start`
+- **Healthcheck Path**: `/api/health`
+- **Restart Policy**: `On Failure` (Max Retries: `10`)
+
+### Step 6: Configure Custom Domain
 1. In `cb_hrm` service $\rightarrow$ **Settings** $\rightarrow$ **Networking** $\rightarrow$ **Custom Domain**.
 2. Enter: `hrm.capitalbridgelogistics.com`.
 3. Railway provides a CNAME record (e.g., `xxx.up.railway.app`).
@@ -211,4 +247,8 @@ Once GitHub Actions reports green:
    ```
 2. Log into the portal with Admin credentials.
 3. Test the **[Open CRM]** button to ensure the HMAC-SHA256 JWT handshake redirects seamlessly to `https://crm.capitalbridgelogistics.com/dashboard`.
+4. Test **Federated Single Sign-Out (SLO)**:
+   - Click the user avatar in HRM $\rightarrow$ **Sign Out**.
+   - Assert redirected through `${CRM_BASE_URL}/api/auth/slo` which evicts CRM session cookies and redirects back to `https://hrm.capitalbridgelogistics.com/login`.
+   - In any previously open CRM or HRM tabs, switching window focus automatically triggers `SessionSyncProvider` check and immediately redirects to `/login`.
 

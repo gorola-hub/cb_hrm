@@ -63,18 +63,43 @@ Copy `.env.example` to create your local `.env` file:
 cp .env.example .env
 ```
 
+Generate secure random secrets using OpenSSL or Node.js:
+```bash
+# OpenSSL (macOS / Linux):
+openssl rand -hex 32
+
+# Node.js (Universal):
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
 Verify your `.env` contains the correct values:
 ```ini
-# PostgreSQL connection (Shared database)
+# PostgreSQL connection (Shared database — MUST MATCH CB CRM)
 DATABASE_URL="postgresql://cb_user:cb_password@localhost:5432/cb_crm"
 
 # NextAuth Configuration
 NEXTAUTH_URL="http://localhost:3001"
 NEXTAUTH_SECRET="development-secret-must-be-at-least-32-chars-long"
 
-# Single Sign-On (SSO) Bridge Secret (Must match CB CRM .env)
+# Single Sign-On (SSO) Bridge Secret (MUST MATCH CB CRM IDENTICALLY)
 SHARED_SSO_SECRET="capital-bridge-shared-sso-secret-dev-environment-key-32chars"
+
+# Capital Bridge CRM URL (Points to CRM for SSO bridge and Single Sign-Out)
+CRM_BASE_URL="http://localhost:3000"
+NEXT_PUBLIC_CRM_URL="http://localhost:3000"
 ```
+
+---
+
+### Variable Synchronization Contract Between HRM and CRM
+
+| Variable | Synchronization Requirement | Purpose |
+|:---|:---|:---|
+| `DATABASE_URL` | **MUST BE IDENTICAL** | Both apps connect to the exact same PostgreSQL database (`cb_crm`). User authentication and identities are shared. |
+| `SHARED_SSO_SECRET` | **MUST BE IDENTICAL** | HMAC-SHA256 signature key for one-time SSO JWT tokens when bridging from HRM into CRM. |
+| `CRM_BASE_URL` / `NEXT_PUBLIC_CRM_URL` | Points to CRM | In HRM `.env`, points to CRM (`http://localhost:3000`). In CRM `.env`, `HRM_BASE_URL` points to HRM (`http://localhost:3001`). |
+| `NEXTAUTH_URL` | Local | Points to HRM canonical URL (`http://localhost:3001`). |
+| `NEXTAUTH_SECRET` | Local | HRM-specific session cookie encryption secret. |
 
 ### Step 4: Start the Local Database (If Not Already Running)
 Check if PostgreSQL is already active:
@@ -135,6 +160,9 @@ If running against a freshly seeded local database:
 ## 5. Helpful Development Commands
 
 ```bash
+# Run full local CI pipeline (Typecheck, Lint, Test, Build)
+npm run ci:quality
+
 # Run tests in watch mode
 npm run test
 

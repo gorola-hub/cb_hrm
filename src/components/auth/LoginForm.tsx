@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { signIn } from 'next-auth/react';
-import { Lock, Mail, AlertCircle, Loader2, Eye, EyeOff, Clock } from 'lucide-react';
+import { Lock, Mail, AlertCircle, Loader2, Eye, EyeOff } from 'lucide-react';
 
 export function LoginForm() {
   const router = useRouter();
@@ -52,51 +52,51 @@ export function LoginForm() {
   }
 
   return (
-    <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-8 space-y-6">
-      <div className="text-center space-y-2">
-        <div className="mx-auto w-14 h-14 bg-amber-500/10 border border-amber-500/20 rounded-2xl flex items-center justify-center mb-4">
-          <Clock className="w-7 h-7 text-amber-400" />
+    <div className="w-full max-w-md bg-[#111111] border border-white/10 rounded-2xl shadow-2xl p-8 space-y-6 card-noise">
+      <div className="space-y-1 text-center pb-2">
+        <div className="mx-auto w-12 h-12 bg-[#ffd700]/20 rounded-xl flex items-center justify-center border border-[#ffd700]/30 mb-2">
+          <Lock className="w-6 h-6 text-[#ffd700]" />
         </div>
-        <h1 className="text-2xl font-bold tracking-tight text-white">
+        <h1 className="text-2xl font-bold tracking-tight text-white font-serif">
           Capital Bridge HRM
         </h1>
-        <p className="text-sm text-slate-400">
-          Employee Self-Service & Attendance Management
+        <p className="text-sm text-[#888888] font-serif">
+          Enter your credentials to access the employee shift platform
         </p>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-4">
         {error && (
-          <div className="flex items-start gap-3 p-3.5 bg-rose-950/40 border border-rose-800/60 rounded-xl text-sm text-rose-300">
-            <AlertCircle className="w-5 h-5 shrink-0 text-rose-400 mt-0.5" />
+          <div className="flex items-center gap-2 p-3 bg-red-950/60 border border-red-800/80 rounded-lg text-sm text-red-300">
+            <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
             <span>{error}</span>
           </div>
         )}
 
         <div className="space-y-2">
-          <label className="text-xs font-semibold uppercase tracking-wider text-slate-300" htmlFor="email">
+          <label className="text-sm font-medium text-white font-serif block" htmlFor="email">
             Corporate Email
           </label>
           <div className="relative">
-            <Mail className="absolute left-3.5 top-3.5 h-4 w-4 text-slate-500" />
+            <Mail className="absolute left-3 top-3 h-4 w-4 text-[#888888]" />
             <input
               id="email"
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="broker@capitalbridgelogistics.com"
+              placeholder="agent@capitalbridgelogistics.com"
               required
-              className="w-full pl-10 pr-4 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-amber-400/80 focus:ring-1 focus:ring-amber-400/30 text-sm transition"
+              className="w-full pl-10 pr-4 py-2.5 bg-[#0a0a0a] border border-white/15 rounded-lg text-white placeholder:text-[#888888] focus:outline-none focus:border-[#ffd700] focus:ring-1 focus:ring-[#ffd700]/20 text-sm font-serif transition"
             />
           </div>
         </div>
 
         <div className="space-y-2">
-          <label className="text-xs font-semibold uppercase tracking-wider text-slate-300" htmlFor="password">
+          <label className="text-sm font-medium text-white font-serif block" htmlFor="password">
             Password
           </label>
           <div className="relative">
-            <Lock className="absolute left-3.5 top-3.5 h-4 w-4 text-slate-500" />
+            <Lock className="absolute left-3 top-3 h-4 w-4 text-[#888888]" />
             <input
               id="password"
               type={showPassword ? 'text' : 'password'}
@@ -104,13 +104,13 @@ export function LoginForm() {
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••••••"
               required
-              className="w-full pl-10 pr-10 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-amber-400/80 focus:ring-1 focus:ring-amber-400/30 text-sm transition"
+              className="w-full pl-10 pr-10 py-2.5 bg-[#0a0a0a] border border-white/15 rounded-lg text-white placeholder:text-[#888888] focus:outline-none focus:border-[#ffd700] focus:ring-1 focus:ring-[#ffd700]/20 text-sm font-serif transition"
             />
             <button
               type="button"
+              aria-label="toggle password visibility"
               onClick={() => setShowPassword(!showPassword)}
-              className="absolute right-3.5 top-3.5 text-slate-500 hover:text-slate-300 transition"
-              tabIndex={-1}
+              className="absolute right-3 top-3 text-[#888888] hover:text-white p-0.5 cursor-pointer"
             >
               {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
             </button>
@@ -120,19 +120,18 @@ export function LoginForm() {
         <button
           type="submit"
           disabled={isLoading}
-          className="w-full py-3 px-4 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-semibold rounded-xl text-sm transition flex items-center justify-center gap-2 shadow-lg shadow-amber-500/10 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="w-full bg-[#ffd700] hover:bg-[#ffe033] text-black font-bold py-2.5 rounded-lg transition-colors shadow-lg shadow-yellow-900/10 mt-2 cursor-pointer font-serif flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {isLoading ? (
-            <>
+            <span className="flex items-center justify-center gap-2">
               <Loader2 className="w-4 h-4 animate-spin" />
-              <span>Authenticating...</span>
-            </>
+              Signing in...
+            </span>
           ) : (
-            <span>Sign In to Shift Portal</span>
+            'Sign In to Shift Portal'
           )}
         </button>
       </form>
     </div>
   );
 }
-

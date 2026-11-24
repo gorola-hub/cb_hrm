@@ -1,9 +1,6 @@
 import { describe, it, expect, beforeEach, afterAll } from 'vitest';
-import { punchIn, punchOut, getTodayShiftState } from '@/service/attendance.service';
+import { punchIn, punchOut } from '@/service/attendance.service';
 import { prisma } from '@/lib/prisma';
-import { toZonedTime } from 'date-fns-tz';
-
-const IST_TIMEZONE = 'Asia/Kolkata';
 
 describe('IST Night-Shift Engine & Attendance Punch-In/Out Core', () => {
   let testUserId: string;

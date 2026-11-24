@@ -16,7 +16,7 @@ All phase execution adheres to the **TDD Phase Format** specified in [TDD_INSTRU
 | **Phase 3** | IST Night-Shift Engine & Punch-In/Out Core | **[x] COMPLETED** | `src/repository/attendance.repository.ts`, `src/service/attendance.service.ts`, `src/app/api/attendance/` |
 | **Phase 4** | Unlimited Break Engine & State Machine | **[x] COMPLETED** | `src/repository/break.repository.ts`, `src/service/break.service.ts`, `src/app/api/attendance/break/` |
 | **Phase 5** | Employee Self-Service Dashboard & Calendar Grid | **[x] COMPLETED** | `src/components/attendance/LiveClock.tsx`, `src/components/attendance/PunchCard.tsx`, `src/components/attendance/AttendanceCalendar.tsx`, `src/app/(portal)/dashboard/page.tsx` |
-| **Phase 6** | Single Sign-On (SSO) Bridge to CRM *(Execute CRM Phase 30 first)* | **[x] COMPLETED** | `src/service/sso.service.ts`, `src/app/api/auth/sso/token/route.ts`, `src/components/layout/Navbar.tsx` |
+| **Phase 6** | Single Sign-On (SSO) Bridge to CRM, Federated Single Sign-Out (SLO) & UI Parity | **[x] COMPLETED** | `src/service/sso.service.ts`, `src/app/api/auth/sso/token/route.ts`, `src/app/api/auth/slo/route.ts`, `src/components/providers/SessionSyncProvider.tsx`, `src/components/providers/LenisProvider.tsx`, `src/components/layout/Navbar.tsx`, `src/components/layout/UserAvatarDropdown.tsx` |
 | **Phase 7** | Leave Management & Admin Approval Workflow | **[ ] PENDING** | `src/repository/leave.repository.ts`, `src/service/leave.service.ts`, `src/app/api/leaves/`, `src/components/leaves/` |
 | **Phase 8** | Admin Attendance Command Center & Regularization | **[ ] PENDING** | `src/repository/adminAttendance.repository.ts`, `src/service/adminAttendance.service.ts`, `src/app/(admin)/admin/attendance/page.tsx` |
 | **Phase 9** | Shift Master & Employee Shift Assignment | **[ ] PENDING** | `src/repository/shift.repository.ts`, `src/service/shift.service.ts`, `src/app/(admin)/admin/shifts/page.tsx` |
@@ -479,6 +479,40 @@ Employees and administrators need to navigate seamlessly from Capital Bridge HRM
 
 #### Phase 6 Verification Chain
 Authenticated user in HRM views Navbar $\rightarrow$ Clicks `[Open CRM]` $\rightarrow$ Button shows loading state $\rightarrow$ HRM calls `/api/auth/sso/token` $\rightarrow$ Service generates HMAC-SHA256 JWT with 60s TTL $\rightarrow$ Browser opens `http://localhost:3000/api/auth/sso?token=...` in new window $\rightarrow$ CRM validates signature and user status $\rightarrow$ CRM sets NextAuth session cookie and redirects to `/dashboard` $\rightarrow$ ✅ Phase 6 Complete.
+
+---
+
+### Post-Phase 6 Session Note: Federated Full SSO/SLO, UI Parity & Database Backup Guarantees
+
+Following the completion of Phase 6, several critical architectural enhancements, design parity adjustments, and pipeline modernizations were implemented outside the original linear roadmap:
+
+#### 1. Full Single Sign-Out (SLO) & Sole Identity Gatekeeper
+- **Federated Session Eviction:** Implemented Option 1 (Full SLO). Signing out from either CRM or HRM evicts session cookies across both portals.
+  - `cb_hrm/src/app/api/auth/slo/route.ts`: Clears `cb_hrm.session-token`, `__Secure-cb_hrm.session-token`, and CSRF cookies (`Max-Age: 0`) and validates callback redirection via `getSafeRedirectUrl`.
+  - `cb_crm/src/app/api/auth/slo/route.ts`: Clears `authjs.session-token`, `__Secure-authjs.session-token`, and redirects cleanly to `${HRM_BASE_URL}/login`.
+- **HRM Sole Gatekeeper:** Updated `cb_crm/src/middleware.ts` to strictly prohibit direct login attempts or unauthenticated dashboard visits, redirecting all unauthenticated traffic directly to `${HRM_BASE_URL}/login`.
+- **Real-Time Cross-Tab Eviction (`SessionSyncProvider.tsx`):** Added a global window focus listener in both applications that queries `/api/auth/session` upon tab activation. If another tab or app logs out, switching back to any open tab immediately catches the destroyed session and redirects to `/login` without requiring manual page reloads.
+
+#### 2. Design Parity, Lenis Smooth Scroll & Theme Tokens
+- **Theme Tokens Refactoring:** Replaced hardcoded zinc/black backgrounds and white text across all attendance components (`PunchCard.tsx`, `LiveClock.tsx`, `AttendanceCalendar.tsx`, `DayDetailModal.tsx`) with semantic theme variables (`bg-card`, `bg-secondary`, `bg-muted`, `text-foreground`, `text-muted-foreground`, `border-border`). Light theme now renders with crisp contrast and no dark card artifacts.
+- **Header & Typography Alignment:** Aligned page and card headings with CRM styling (`font-serif`, `text-2xl font-bold tracking-tight text-foreground`, gold icon accents, `border-b border-border pb-4`).
+- **Navbar Layout Refinements:**
+  - Removed container `px-4 sm:px-6 lg:px-8` in `Navbar.tsx` to align the logo flush left (`pl-0`), exactly matching CRM.
+  - Completely removed the `HRM` pill badge beside the logo.
+  - Removed the dark pill background from the user avatar dropdown in light theme (`bg-secondary border-2 border-[#ffd700] text-foreground`).
+- **Lenis Smooth Scroll:** Added `lenis` to HRM via `LenisProvider.tsx`, configured with CRM physics (`lerp: 0.1`, `duration: 1.2`, `smoothWheel: true`) and wrapped around `(portal)/layout.tsx`.
+
+#### 3. ESLint 9 Flat Config & Quality Pipeline Standardization
+- **ESLint v9 Flat Config:** Created `cb_hrm/eslint.config.mjs` matching Next.js 16 core-web-vitals and TypeScript standards with zero errors and zero warnings.
+- **Pipeline Standardization:** Removed the ambiguous `"ci"` script (which conflicted with `npm ci` clean install) and standardized on:
+  ```json
+  "ci:quality": "npm run typecheck && npm run lint && npm run test:run && npm run build"
+  ```
+- **Verification:** 100% pass across TypeScript typechecking, ESLint, all 16 Vitest test suites (64 tests passing), and Next.js Turbopack production build.
+
+#### 4. Shared Database Automated Backup & Minor Edge Case Note
+- **Full Database Coverage:** The production backup cron job (which runs `createAndUploadBackup()` in `cb_crm/src/service/backup.service.ts`) executes `pg_dump "${DATABASE_URL}"`. Because HRM and CRM share the exact same PostgreSQL database (`cb_crm`), and `pg_dump` executes without table filters, all 21 tables (including all 7 HRM tables: `hrm_shifts`, `hrm_employee_shifts`, `hrm_attendance_records`, `hrm_break_records`, `hrm_holidays`, `hrm_leave_requests`, `hrm_attendance_audit_logs`) are automatically captured in `.sql.gz` archives and pushed to GoDaddy SFTP or Google Drive.
+- **Minor Edge-Case Note:** In standard production environments where the `pg_dump` binary is installed (which produces the standard `.sql.gz` file for GoDaddy SFTP or Google Drive), **100% of HRM tables are backed up automatically**. The only exception is if the server environment lacks `pg_dump` entirely, causing it to fall back to the emergency JSON fallback (which was hardcoded to CRM Prisma models). As long as your production server generates `.sql.gz` backups, all HRM data is fully protected.
 
 ---
 

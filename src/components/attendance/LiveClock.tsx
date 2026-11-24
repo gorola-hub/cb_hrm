@@ -23,7 +23,6 @@ export function LiveClock() {
           serverOffset = serverTime + latency - Date.now();
         }
       } catch {
-        // Fallback to local clock if health check is unavailable
         serverOffset = 0;
       }
       setCurrentTime(new Date(Date.now() + serverOffset));
@@ -41,11 +40,11 @@ export function LiveClock() {
 
   if (!mounted || !currentTime) {
     return (
-      <div className="flex items-center gap-3 bg-slate-900 border border-slate-800 rounded-2xl px-5 py-3 shadow-lg animate-pulse">
-        <Clock className="w-6 h-6 text-slate-600" />
+      <div className="flex items-center gap-3 bg-card border border-border rounded-2xl px-5 py-3 shadow-lg animate-pulse card-noise">
+        <Clock className="w-6 h-6 text-muted-foreground" />
         <div className="space-y-1.5">
-          <div className="h-6 w-28 bg-slate-800 rounded"></div>
-          <div className="h-3 w-40 bg-slate-800 rounded"></div>
+          <div className="h-6 w-28 bg-muted rounded"></div>
+          <div className="h-3 w-40 bg-muted rounded"></div>
         </div>
       </div>
     );
@@ -69,24 +68,23 @@ export function LiveClock() {
   });
 
   return (
-    <div className="flex items-center gap-4 bg-slate-900/90 border border-slate-800 rounded-2xl px-5 py-3 shadow-lg">
-      <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 shrink-0">
-        <Clock className="w-5 h-5 animate-pulse" />
+    <div className="flex items-center gap-4 bg-card border border-border rounded-2xl px-5 py-3 shadow-lg card-noise text-card-foreground">
+      <div className="w-10 h-10 rounded-xl bg-amber-400/15 border border-amber-400/30 flex items-center justify-center text-[#ffd700] shrink-0">
+        <Clock className="w-5 h-5" />
       </div>
       <div>
         <div className="flex items-baseline gap-2">
-          <span className="text-2xl font-bold font-mono tracking-tight text-white tabular-nums">
+          <span className="text-2xl font-bold font-mono tracking-tight text-foreground tabular-nums">
             {timeString}
           </span>
-          <span className="text-xs font-semibold text-amber-400/90 px-1.5 py-0.5 bg-amber-400/10 rounded">
+          <span className="text-[11px] font-semibold text-[#ffd700] px-2 py-0.5 bg-zinc-900 border border-amber-400/60 rounded font-mono">
             IST
           </span>
         </div>
-        <div className="text-xs text-slate-400 font-medium">
+        <div className="text-xs text-muted-foreground font-serif">
           {dateString}
         </div>
       </div>
     </div>
   );
 }
-

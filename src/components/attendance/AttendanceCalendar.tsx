@@ -5,12 +5,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Calendar as CalendarIcon,
-  CheckCircle2,
-  Clock,
-  AlertTriangle,
-  Coffee,
   Loader2,
-  ShieldAlert,
 } from 'lucide-react';
 import {
   MonthlyAttendanceResponse,
@@ -69,73 +64,96 @@ export function AttendanceCalendar({ refreshTrigger }: AttendanceCalendarProps) 
     setYearMonth(`${nextY}-${nextM}`);
   }
 
-  // Display Month Year title
   const monthTitle = (() => {
     const [y, m] = yearMonth.split('-').map(Number);
     const d = new Date(Date.UTC(y, m - 1, 1));
     return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
   })();
 
-  // Calculate grid padding for Monday-start calendar
-  const paddingDays = (() => {
-    if (!calendarData || calendarData.days.length === 0) return 0;
-    const firstDay = calendarData.days[0];
-    const d = new Date(`${firstDay.date}T12:00:00.000Z`);
-    const dayOfWeek = d.getUTCDay(); // 0 = Sun, 1 = Mon ... 6 = Sat
-    return (dayOfWeek - 1 + 7) % 7;
+  const firstDayOfWeek = (() => {
+    const [y, m] = yearMonth.split('-').map(Number);
+    const d = new Date(Date.UTC(y, m - 1, 1));
+    const day = d.getUTCDay();
+    return day === 0 ? 6 : day - 1; // 0 = Monday, 6 = Sunday
   })();
+
+  const paddingDays = firstDayOfWeek;
 
   function getBadgeConfig(status: MonthDayAttendance['status']) {
     switch (status) {
       case 'P':
-        return { label: 'P', title: 'Present (Full Day)', className: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' };
+        return {
+          label: 'P',
+          title: 'Present (Full Day)',
+          className: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+        };
       case 'HD':
-        return { label: 'HD', title: 'Half Day', className: 'bg-amber-500/20 text-amber-400 border-amber-500/30' };
+        return {
+          label: 'HD',
+          title: 'Half Day (5h to <8.5h)',
+          className: 'bg-[#ffd700]/20 text-[#ffd700] border border-[#ffd700]/30',
+        };
       case 'A':
-        return { label: 'A', title: 'Absent', className: 'bg-rose-500/20 text-rose-400 border-rose-500/30' };
+        return {
+          label: 'A',
+          title: 'Absent (<5h)',
+          className: 'bg-rose-500/20 text-rose-400 border-rose-500/30',
+        };
       case 'LV':
-        return { label: 'LV', title: 'Approved Leave', className: 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30' };
+        return {
+          label: 'LV',
+          title: 'Approved Leave',
+          className: 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30',
+        };
       case 'WO':
-        return { label: 'WO', title: 'Week Off', className: 'bg-slate-800 text-slate-500 border-slate-700' };
+        return {
+          label: 'WO',
+          title: 'Week Off (Weekend)',
+          className: 'bg-muted text-muted-foreground border border-border',
+        };
       case 'IN_PROGRESS':
-        return { label: 'LIVE', title: 'Shift In Progress', className: 'bg-blue-500/20 text-blue-400 border-blue-500/30 animate-pulse' };
+        return {
+          label: 'LIVE',
+          title: 'Shift in Progress',
+          className: 'bg-blue-500/20 text-blue-500 dark:text-blue-400 border border-blue-500/30 animate-pulse',
+        };
       default:
         return null;
     }
   }
 
   return (
-    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
+    <div className="bg-card border border-border rounded-2xl p-6 shadow-xl space-y-6 card-noise text-card-foreground">
       {/* Month Navigation & Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-5">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border pb-4">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
+          <div className="w-10 h-10 rounded-xl bg-amber-400/15 border border-amber-400/30 flex items-center justify-center text-[#ffd700]">
             <CalendarIcon className="w-5 h-5" />
           </div>
           <div>
-            <h2 className="text-lg font-semibold text-white">
-              Monthly Attendance
+            <h2 className="text-xl font-bold text-foreground font-serif">
+              Attendance Calendar
             </h2>
-            <p className="text-xs text-slate-400">
+            <p className="text-xs text-muted-foreground font-serif">
               Shift records and work hours anchored to Indian Standard Time
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 bg-slate-950 p-1.5 rounded-xl border border-slate-800 self-start sm:self-auto">
+        <div className="flex items-center gap-2 bg-secondary p-1.5 rounded-xl border border-border self-start sm:self-auto">
           <button
             onClick={handlePrevMonth}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
+            className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition cursor-pointer"
             aria-label="Previous Month"
           >
             <ChevronLeft className="w-4 h-4" />
           </button>
-          <span className="text-sm font-semibold text-slate-200 px-3 min-w-[130px] text-center font-mono">
+          <span className="text-sm font-semibold text-foreground px-3 min-w-[130px] text-center font-serif">
             {monthTitle}
           </span>
           <button
             onClick={handleNextMonth}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
+            className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition cursor-pointer"
             aria-label="Next Month"
           >
             <ChevronRight className="w-4 h-4" />
@@ -146,65 +164,65 @@ export function AttendanceCalendar({ refreshTrigger }: AttendanceCalendarProps) 
       {/* KPI Summary Cards */}
       {calendarData?.summary && (
         <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
-          <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-3">
-            <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+          <div className="bg-secondary border border-border rounded-xl p-3">
+            <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider font-serif">
               Present (P)
             </div>
-            <div className="text-xl font-bold font-mono text-emerald-400 mt-1">
+            <div className="text-xl font-bold font-mono text-emerald-500 dark:text-emerald-400 mt-1">
               {calendarData.summary.presentCount}
             </div>
           </div>
 
-          <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-3">
-            <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+          <div className="bg-secondary border border-border rounded-xl p-3">
+            <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider font-serif">
               Half Day (HD)
             </div>
-            <div className="text-xl font-bold font-mono text-amber-400 mt-1">
+            <div className="text-xl font-bold font-mono text-[#ffd700] mt-1">
               {calendarData.summary.halfDayCount}
             </div>
           </div>
 
-          <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-3">
-            <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+          <div className="bg-secondary border border-border rounded-xl p-3">
+            <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider font-serif">
               Absent (A)
             </div>
-            <div className="text-xl font-bold font-mono text-rose-400 mt-1">
+            <div className="text-xl font-bold font-mono text-rose-500 dark:text-rose-400 mt-1">
               {calendarData.summary.absentCount}
             </div>
           </div>
 
-          <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-3">
-            <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+          <div className="bg-secondary border border-border rounded-xl p-3">
+            <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider font-serif">
               Leaves (LV)
             </div>
-            <div className="text-xl font-bold font-mono text-indigo-400 mt-1">
+            <div className="text-xl font-bold font-mono text-indigo-500 dark:text-indigo-400 mt-1">
               {calendarData.summary.leaveCount}
             </div>
           </div>
 
-          <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-3">
-            <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+          <div className="bg-secondary border border-border rounded-xl p-3">
+            <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider font-serif">
               Week Off (WO)
             </div>
-            <div className="text-xl font-bold font-mono text-slate-400 mt-1">
+            <div className="text-xl font-bold font-mono text-muted-foreground mt-1">
               {calendarData.summary.weekOffCount}
             </div>
           </div>
 
-          <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-3">
-            <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+          <div className="bg-secondary border border-border rounded-xl p-3">
+            <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider font-serif">
               Late Arrivals
             </div>
-            <div className="text-xl font-bold font-mono text-amber-400 mt-1">
+            <div className="text-xl font-bold font-mono text-[#ffd700] mt-1">
               {calendarData.summary.lateCount}
             </div>
           </div>
 
-          <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-3 col-span-2 sm:col-span-1">
-            <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+          <div className="bg-secondary border border-border rounded-xl p-3 col-span-2 sm:col-span-1">
+            <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider font-serif">
               Total Net Hours
             </div>
-            <div className="text-xl font-bold font-mono text-white mt-1">
+            <div className="text-xl font-bold font-mono text-foreground mt-1">
               {(calendarData.summary.totalNetMinutes / 60).toFixed(1)}h
             </div>
           </div>
@@ -214,22 +232,22 @@ export function AttendanceCalendar({ refreshTrigger }: AttendanceCalendarProps) 
       {/* Calendar Grid */}
       {loading ? (
         <div className="flex items-center justify-center min-h-[300px]">
-          <div className="flex items-center gap-3 text-slate-400 text-sm">
-            <Loader2 className="w-5 h-5 animate-spin text-amber-400" />
+          <div className="flex items-center gap-3 text-muted-foreground text-sm font-serif">
+            <Loader2 className="w-5 h-5 animate-spin text-[#ffd700]" />
             <span>Loading monthly calendar...</span>
           </div>
         </div>
       ) : (
         <div>
           {/* Day of week headers */}
-          <div className="grid grid-cols-7 gap-2 text-center text-xs font-semibold uppercase tracking-wider text-slate-400 pb-2">
+          <div className="grid grid-cols-7 gap-2 text-center text-xs font-semibold uppercase tracking-wider text-muted-foreground pb-2 font-serif">
             <div>Mon</div>
             <div>Tue</div>
             <div>Wed</div>
             <div>Thu</div>
             <div>Fri</div>
-            <div className="text-slate-500">Sat</div>
-            <div className="text-slate-500">Sun</div>
+            <div className="opacity-70">Sat</div>
+            <div className="opacity-70">Sun</div>
           </div>
 
           {/* Month day grid */}
@@ -238,7 +256,7 @@ export function AttendanceCalendar({ refreshTrigger }: AttendanceCalendarProps) 
             {Array.from({ length: paddingDays }).map((_, idx) => (
               <div
                 key={`pad-${idx}`}
-                className="h-20 sm:h-24 bg-slate-950/30 border border-slate-900 rounded-xl opacity-30"
+                className="h-20 sm:h-24 bg-secondary/30 border border-border/40 rounded-xl opacity-30"
               />
             ))}
 
@@ -253,20 +271,20 @@ export function AttendanceCalendar({ refreshTrigger }: AttendanceCalendarProps) 
                   onClick={() => isClickable && setSelectedDay(day)}
                   className={`h-20 sm:h-24 p-2 rounded-xl border flex flex-col justify-between transition relative ${
                     isClickable
-                      ? 'bg-slate-950/90 border-slate-800 hover:border-slate-700 hover:bg-slate-800/40 cursor-pointer'
+                      ? 'bg-secondary border-border hover:border-amber-400/60 hover:bg-muted cursor-pointer'
                       : day.isWeekend
-                      ? 'bg-slate-950/40 border-slate-900 text-slate-600'
-                      : 'bg-slate-950/60 border-slate-900 text-slate-500'
+                      ? 'bg-secondary/40 border-border/40 text-muted-foreground'
+                      : 'bg-secondary/60 border-border/60 text-muted-foreground'
                   }`}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold font-mono text-slate-300">
+                    <span className="text-xs font-bold font-mono text-foreground">
                       {day.dayNumber}
                     </span>
                     {day.isLate && (
                       <span
                         title={`Late by ${day.lateMinutes} mins`}
-                        className="w-1.5 h-1.5 rounded-full bg-amber-400"
+                        className="w-1.5 h-1.5 rounded-full bg-[#ffd700]"
                       />
                     )}
                   </div>
@@ -284,7 +302,7 @@ export function AttendanceCalendar({ refreshTrigger }: AttendanceCalendarProps) 
                     )}
 
                     {day.netWorkMinutes > 0 && (
-                      <div className="text-[10px] font-mono text-slate-400 font-medium">
+                      <div className="text-[10px] font-mono text-muted-foreground font-medium">
                         {(day.netWorkMinutes / 60).toFixed(1)}h
                       </div>
                     )}
@@ -306,4 +324,3 @@ export function AttendanceCalendar({ refreshTrigger }: AttendanceCalendarProps) 
     </div>
   );
 }
-

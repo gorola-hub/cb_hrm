@@ -1,6 +1,8 @@
 import { redirect } from 'next/navigation';
 import { auth } from '@/lib/auth';
 import { Navbar } from '@/components/layout/Navbar';
+import { SessionSyncProvider } from '@/components/providers/SessionSyncProvider';
+import { LenisProvider } from '@/components/providers/LenisProvider';
 
 export default async function PortalLayout({
   children,
@@ -14,12 +16,15 @@ export default async function PortalLayout({
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 flex flex-col">
-      <Navbar user={session.user} />
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-        {children}
-      </main>
-    </div>
+    <LenisProvider>
+      <SessionSyncProvider>
+        <div className="min-h-screen flex flex-col bg-background text-foreground transition-colors duration-200">
+          <Navbar user={session.user} />
+          <main className="flex-1 w-full px-[5%] md:px-[15%] py-6 md:py-8 space-y-8">
+            {children}
+          </main>
+        </div>
+      </SessionSyncProvider>
+    </LenisProvider>
   );
 }
-

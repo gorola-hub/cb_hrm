@@ -26,7 +26,7 @@ describe('Authentication & User Synchronization (TS-AUTH)', () => {
     // roy@capitalbridgelogistics.com is an existing deactivated user in CRM (isActive = false)
     // Ensure test user with isActive = false exists
     const inactiveEmail = 'inactive_test@capitalbridgelogistics.com';
-    let inactiveUser = await prisma.user.findUnique({ where: { email: inactiveEmail } });
+    const inactiveUser = await prisma.user.findUnique({ where: { email: inactiveEmail } });
     if (!inactiveUser) {
       const brokerRole = await prisma.role.findFirst({ where: { code: 'BROKER' } });
       await prisma.$executeRaw`

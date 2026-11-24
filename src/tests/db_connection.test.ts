@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, afterAll } from 'vitest';
 import { prisma } from '@/lib/prisma';
 
 describe('Database Connection & Relational Schema Integration', () => {
