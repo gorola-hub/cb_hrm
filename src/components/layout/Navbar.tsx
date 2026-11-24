@@ -1,7 +1,8 @@
 'use client';
 
+import { useState } from 'react';
 import { signOut } from 'next-auth/react';
-import { Clock, ExternalLink, LogOut, User as UserIcon } from 'lucide-react';
+import { Clock, ExternalLink, Loader2, LogOut, User as UserIcon } from 'lucide-react';
 import Link from 'next/link';
 
 interface NavbarUser {
@@ -22,6 +23,28 @@ interface NavbarProps {
 }
 
 export function Navbar({ user }: NavbarProps) {
+  const [isOpeningCrm, setIsOpeningCrm] = useState(false);
+
+  const handleOpenCrm = async () => {
+    if (isOpeningCrm) return;
+    setIsOpeningCrm(true);
+
+    try {
+      const res = await fetch('/api/auth/sso/token');
+      const data = await res.json();
+
+      if (res.ok && data.success && data.ssoUrl) {
+        window.open(data.ssoUrl, '_blank', 'noopener,noreferrer');
+      } else {
+        alert(data.error?.message || 'Failed to generate CRM SSO link. Please try again.');
+      }
+    } catch {
+      alert('Network error connecting to SSO bridge.');
+    } finally {
+      setIsOpeningCrm(false);
+    }
+  };
+
   return (
     <header className="sticky top-0 z-40 w-full border-b border-slate-800 bg-slate-950/80 backdrop-blur-md">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
@@ -52,7 +75,30 @@ export function Navbar({ user }: NavbarProps) {
         </div>
 
         {/* Right Section: User & Actions */}
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3 sm:gap-4">
+          {/* SSO Bridge: Open CRM Button */}
+          <button
+            onClick={handleOpenCrm}
+            disabled={isOpeningCrm}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/30 hover:bg-amber-500/20 active:scale-95 transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+            title="Open Capital Bridge CRM in new tab"
+            aria-label="Open CRM"
+          >
+            {isOpeningCrm ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span className="hidden xs:inline">Opening CRM...</span>
+              </>
+            ) : (
+              <>
+                <ExternalLink className="w-3.5 h-3.5" />
+                <span>Open CRM</span>
+              </>
+            )}
+          </button>
+
+          <div className="h-4 w-px bg-slate-800" />
+
           {/* User Profile Badge */}
           <div className="flex items-center gap-3">
             <div className="hidden sm:block text-right">
@@ -85,4 +131,3 @@ export function Navbar({ user }: NavbarProps) {
     </header>
   );
 }
-
