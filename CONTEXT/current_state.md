@@ -18,6 +18,7 @@ All phase execution adheres to the **TDD Phase Format** specified in [TDD_INSTRU
 | **Phase 5** | Employee Self-Service Dashboard & Calendar Grid | **[x] COMPLETED** | `src/components/attendance/LiveClock.tsx`, `src/components/attendance/PunchCard.tsx`, `src/components/attendance/AttendanceCalendar.tsx`, `src/app/(portal)/dashboard/page.tsx` |
 | **Phase 6** | Single Sign-On (SSO) Bridge to CRM, Federated Single Sign-Out (SLO) & UI Parity | **[x] COMPLETED** | `src/service/sso.service.ts`, `src/app/api/auth/sso/token/route.ts`, `src/app/api/auth/slo/route.ts`, `src/components/providers/SessionSyncProvider.tsx`, `src/components/providers/LenisProvider.tsx`, `src/components/layout/Navbar.tsx`, `src/components/layout/UserAvatarDropdown.tsx` |
 | **Phase 7** | Leave Management & Admin Approval Workflow | **[x] COMPLETED** | `src/repository/leave.repository.ts`, `src/service/leave.service.ts`, `src/app/api/leaves/`, `src/app/api/admin/leaves/`, `src/components/leaves/` |
+| **Phase 7.5** | Dynamic Leave Types, Per-Employee Balances, Enum Hardening & Migration Safeguards *(Synced with CRM Phase 32)* | **[ ] PENDING** | `prisma/schema.prisma`, `prisma/migrations/`, `scripts/verify-hrm-migrations.mjs`, `src/repository/leaveType.repository.ts`, `src/repository/leaveBalance.repository.ts`, `src/service/leaveType.service.ts`, `src/service/leaveBalance.service.ts`, `src/app/api/admin/leave-types/`, `src/app/api/admin/leave-balances/` |
 | **Phase 8** | Admin Attendance Command Center & Regularization | **[ ] PENDING** | `src/repository/adminAttendance.repository.ts`, `src/service/adminAttendance.service.ts`, `src/app/(admin)/admin/attendance/page.tsx` |
 | **Phase 9** | Shift Master & Employee Shift Assignment | **[ ] PENDING** | `src/repository/shift.repository.ts`, `src/service/shift.service.ts`, `src/app/(admin)/admin/shifts/page.tsx` |
 | **Phase 10** | Production Deployment (Railway) & CI/CD Pipeline | **[ ] PENDING** | `.github/workflows/deploy-railway.yml`, Railway configuration, health check monitoring |
@@ -623,7 +624,106 @@ Employee logs in $\rightarrow$ Navigates to `/leaves` $\rightarrow$ Clicks `[App
 
 ---
 
-## 10. High-Level Phase Specifications (Phases 8 through 10)
+## 10. Phase 7.5: Dynamic Leave Types, Per-Employee Balances, Enum Hardening & Migration Safeguards (Full TDD Format)
+
+> [!IMPORTANT]
+> **Cross-Repository Sync:** The migration isolation guard (`scripts/verify-hrm-migrations.mjs`) and `db:migrate` standardization (`prisma migrate deploy`) in this phase are paired with **CRM Phase 32** in `cb_crm/CONTEXT/current_state.md`. Both repositories must enforce inverse shared-DB migration boundaries.
+
+#### Root Cause
+1. `LeaveType` (`CASUAL`, `SICK`, `PRIVILEGED`) and `ShiftCode` (`SHIFT_1700`–`SHIFT_1930`) are currently PostgreSQL enums, and annual leave quotas are hardcoded in `leave.service.ts`. Adding/removing leave types or defining new shifts in Phase 9 would require migrations, and there is no database support for per-employee custom balances, carry-forward rollovers, admin quota adjustments, or unpaid leave types.
+2. `AttendanceStatus` in `prisma/schema.prisma` is missing `ANOMALY_STALE`, which is required by Decision 8 (`decision_log.md`), `BR-IST-004`, and `TS-STALE-001` for >16-hour forgotten punch-outs.
+3. `package.json` currently exposes `"db:migrate": "prisma migrate dev"`, which is unsafe against the shared `cb_crm` PostgreSQL database because Prisma sees undeclared CRM tables as drift. Both `cb_hrm` (Phase 7.5) and `cb_crm` (Phase 32) need automated migration verification scripts and `prisma migrate deploy` standardization.
+
+#### Target Files
+- `CONTEXT/database_schema.md`, `CONTEXT/project_data.md`, `CONTEXT/decision_log.md`, `CONTEXT/test_scenarios.md` — Authoritative documentation updates (including Decision 10)
+- `scripts/verify-hrm-migrations.mjs` & `src/tests/verifyMigrations.test.ts` — Automated SQL migration isolation guard
+- `package.json` — Set `"db:migrate": "prisma migrate deploy"`, add `"db:verify-migrations"`, wire into `"ci:quality"` (remove `migrate dev` script)
+- `prisma/schema.prisma` & `prisma/migrations/<timestamp>_dynamic_leave_types_balances_and_enum_hardening/migration.sql` — Single atomic `hrm_*` migration (`hrm_leave_types`, `hrm_leave_balances`, `hrm_leave_requests.leaveTypeId` backfill, `hrm_shifts.code -> String`, `AttendanceStatus += ANOMALY_STALE`)
+- `prisma/seed.ts` — Idempotent upsert of default leave types (`CASUAL`, `SICK`, `PRIVILEGED`) and baseline balances
+- `src/repository/leaveType.repository.ts`, `src/repository/leaveBalance.repository.ts`, `src/repository/leave.repository.ts`
+- `src/service/leaveType.service.ts`, `src/service/leaveBalance.service.ts`, `src/service/leave.service.ts`, `src/service/attendance.service.ts`
+- `src/app/api/leave-types/route.ts`, `src/app/api/leaves/route.ts`, `src/app/api/admin/leave-types/route.ts`, `src/app/api/admin/leave-types/[id]/route.ts`, `src/app/api/admin/leave-balances/route.ts`, `src/app/api/admin/leave-balances/adjust/route.ts`, `src/app/api/admin/leave-balances/carry-forward/route.ts`
+- `src/components/leaves/LeaveRequestModal.tsx`, `src/components/leaves/LeaveHistoryList.tsx`, `src/components/leaves/AdminLeaveTypesManager.tsx`, `src/components/leaves/AdminLeaveBalancesManager.tsx`, `src/app/(admin)/admin/leaves/page.tsx`
+- `src/components/attendance/AttendanceCalendar.tsx`, `src/components/attendance/DayDetailModal.tsx` — `ANOMALY_STALE` badge support
+- `src/tests/verifyMigrations.test.ts`, `src/tests/leaveTypesAndBalances.test.ts`, `src/tests/leave.test.ts`, `src/tests/leaveRoute.test.ts`, `src/tests/leaveUi.test.tsx`
+
+---
+
+### Phase 7.5 Checklist
+
+#### Step 7.5.1: Context Documentation Synchronization (`CONTEXT/`)
+- [x] Update `CONTEXT/database_schema.md` with `hrm_leave_types`, `hrm_leave_balances`, `LeaveRequest.leaveTypeId`, `Shift.code: String`, and `AttendanceStatus.ANOMALY_STALE`.
+- [x] Update `CONTEXT/project_data.md` (`BR-LV-001` dynamic types, per-employee balances, carry-forward, unpaid leave, and `ANOMALY_STALE` in `BR-ATT-002`).
+- [x] Add Decision 10 to `CONTEXT/decision_log.md` documenting promotion of `LeaveType` and `ShiftCode` enums to dynamic master tables / `String` codes and shared-DB migration guardrails (referencing CRM Phase 32).
+- [x] Add coded edge-case scenarios & error codes (`LV_INSUFFICIENT_BALANCE`, `LV_TYPE_INACTIVE`, `LV_TYPE_DUPLICATE`, `LV_TYPE_IN_USE`, `LV_INVALID_ADJUSTMENT`) to `CONTEXT/test_scenarios.md`.
+
+#### Step 7.5.2: Migration Safety Guard & `db:migrate` Standardization (RED $\rightarrow$ GREEN, Synced with CRM Phase 32)
+- [x] **RED Test (`src/tests/verifyMigrations.test.ts`):**
+  - Assert valid `hrm_*` DDL (`CREATE TABLE "hrm_leave_types"`, `ALTER TABLE "hrm_shifts"`, `ALTER TYPE "AttendanceStatus"`, `FOREIGN KEY ... REFERENCES "users"("id")`) passes.
+  - Assert forbidden CRM mutations (`ALTER TABLE "users"`, `DROP TABLE "shipments"`, `CREATE TABLE "invoices"`, `DROP TYPE "PaymentStatus"`) fail with clear error messages.
+  - Run `npm run test:run src/tests/verifyMigrations.test.ts` $\rightarrow$ **CONFIRM RED**.
+- [x] **GREEN Implementation:**
+  - Create `scripts/verify-hrm-migrations.mjs` validating all `prisma/migrations/*/migration.sql` files against the HRM-only allowlist (`hrm_*` tables and HRM enums).
+  - Update `package.json`: change `"db:migrate": "prisma migrate deploy"`, add `"db:verify-migrations": "node scripts/verify-hrm-migrations.mjs"`, and include `npm run db:verify-migrations` in `"ci:quality"`.
+  - Run `npm run test:run src/tests/verifyMigrations.test.ts` and `npm run db:verify-migrations` $\rightarrow$ **CONFIRM GREEN**.
+
+#### Step 7.5.3: Single Atomic Prisma Schema Upgrade, Migration & Seed
+- [ ] Update `prisma/schema.prisma`:
+  - Add `ANOMALY_STALE` to `AttendanceStatus`.
+  - Change `Shift.code` to `String @unique`; remove `enum ShiftCode`.
+  - Add `LeaveTypeConfig` (`hrm_leave_types`) and `LeaveBalance` (`hrm_leave_balances`, `@@unique([userId, leaveTypeId, year])`).
+  - Update `LeaveRequest` (`leaveTypeId` FK $\rightarrow$ `hrm_leave_types.id`); remove `enum LeaveType`.
+- [ ] Author single atomic `prisma/migrations/<timestamp>_dynamic_leave_types_balances_and_enum_hardening/migration.sql` that:
+  - Adds `'ANOMALY_STALE'` to `"AttendanceStatus"`.
+  - Converts `"hrm_shifts"."code"` to `TEXT` and drops `"ShiftCode"`.
+  - Creates `"hrm_leave_types"`, inserts default `CASUAL`, `SICK`, `PRIVILEGED` rows, adds `"leaveTypeId"` to `"hrm_leave_requests"`, backfills existing rows via `"leaveType"::TEXT`, enforces `NOT NULL` + FK, drops old `"leaveType"` column + `"LeaveType"` enum, and creates `"hrm_leave_balances"`.
+- [ ] Verify `npm run db:verify-migrations` passes on the new migration, apply cleanly to shared DB (without touching CRM tables), register in `_prisma_migrations`, and run `npx prisma generate`.
+- [ ] Update `prisma/seed.ts` to idempotently upsert default leave types (`CASUAL`, `SICK`, `PRIVILEGED`) and seed baseline current-year `hrm_leave_balances` for seeded users without overwriting custom admin edits; run `npm run db:seed`.
+
+#### Step 7.5.4: RED State Test Creation for Dynamic Leave Types, Balances & Edge Cases (`src/tests/leaveTypesAndBalances.test.ts` & `src/tests/leave.test.ts`)
+- [ ] Create `src/tests/leaveTypesAndBalances.test.ts` and update `src/tests/leave.test.ts` covering all special & edge cases:
+  - **Dynamic Leave Types:** Create custom type (`BEREAVEMENT`, code auto-uppercased), reject duplicate code case-insensitively (`LV_TYPE_DUPLICATE`), reject negative `defaultAnnualDays` or `maxCarryForwardDays`, update type quotas/rules, deactivate (`isActive = false`) blocking new submissions (`LV_TYPE_INACTIVE`) while preserving historical requests, block delete when requests/balances reference it (`LV_TYPE_IN_USE`), allow delete when unused.
+  - **Per-Employee Custom Balances & Admin Adjustments:** Auto-provision default balance on first read/submit when no row exists; Admin overrides `entitledDays` (e.g., mid-year prorated 6 days) and applies positive/negative `adjustedDays` with audit note; reject adjustments resulting in negative total entitlement (`LV_INVALID_ADJUSTMENT`).
+  - **Carry-Forward Rollover:** `runCarryForwardRollover(fromYear, toYear)` carries unused `fromYear` days (`max(0, entitled + carriedForward + adjusted - approvedUsed)`) into `toYear.carriedForwardDays` capped at `maxCarryForwardDays`; types with `allowCarryForward = false` carry `0`; re-running rollover is **idempotent** (does not double-add); `PENDING`/`REJECTED`/`CANCELLED` days are NOT deducted as used.
+  - **Deduction, Insufficient Balance, Unpaid Leave & Cross-Year Edge Cases:**
+    - Paid leave submission exceeding `remaining - pending` rejects with `LV_INSUFFICIENT_BALANCE` (400).
+    - Half-day fractional balances (`0.5` adjustment/quota) calculate accurately.
+    - Unpaid leave (`isPaid = false`, `defaultAnnualDays = 0`, e.g. `LWP`) succeeds even with `0` balance.
+    - Cross-year leave request (e.g. `2026-12-30` to `2027-01-04`) counts working days per year or validates balance accurately across year boundary.
+    - Concurrent/stale pending approval guard: approving a request when balance was reduced below `totalDays` rejects safely (`LV_INSUFFICIENT_BALANCE`) instead of silently going negative on paid leave.
+    - `ANOMALY_STALE` status record in `getMonthlyAttendance` and `punchIn` (employee with prior `ANOMALY_STALE` shift can still punch in for today's shift).
+- [ ] Run `npm run test:run src/tests/leaveTypesAndBalances.test.ts src/tests/leave.test.ts` $\rightarrow$ **CONFIRM RED**.
+
+#### Step 7.5.5: Repository & Service Implementation & GREEN State
+- [ ] Implement `src/repository/leaveType.repository.ts` and `src/repository/leaveBalance.repository.ts`; update `src/repository/leave.repository.ts` to join `leaveType` relation (`id`, `code`, `name`, `isPaid`, `isActive`, ...).
+- [ ] Implement `src/service/leaveType.service.ts` and `src/service/leaveBalance.service.ts`; update `src/service/leave.service.ts` (dynamic type lookup, balance initialization, deduction, carry-forward rollover, cross-year handling, paid vs unpaid rules).
+- [ ] Update `src/service/attendance.service.ts` (`ANOMALY_STALE` compatibility in `getMonthlyAttendance` & `punchIn`).
+- [ ] Run `npm run test:run src/tests/leaveTypesAndBalances.test.ts src/tests/leave.test.ts` $\rightarrow$ **CONFIRM GREEN**.
+
+#### Step 7.5.6: API Route Handlers & Route Tests (`src/tests/leaveRoute.test.ts`)
+- [ ] Update `src/tests/leaveRoute.test.ts` (RED $\rightarrow$ GREEN) covering:
+  - `GET /api/leave-types` (returns active types for authenticated users; 401 if unauthenticated).
+  - Updated `GET /api/leaves` & `POST /api/leaves` (accepts `leaveTypeId` or `leaveTypeCode`, enforces active type + balance, returns full breakdown `entitledDays`, `carriedForwardDays`, `adjustedDays`, `usedDays`, `pendingDays`, `remainingDays`).
+  - `GET / POST /api/admin/leave-types` & `PATCH / DELETE /api/admin/leave-types/[id]` (ADMIN only; 403 for `BROKER`; 409 on duplicate or in-use delete).
+  - `GET /api/admin/leave-balances`, `PUT /api/admin/leave-balances/adjust`, `POST /api/admin/leave-balances/carry-forward` (ADMIN only; 403 for `BROKER`; validates inputs & idempotency).
+- [ ] Implement all route handlers with Zod validation and `requireAuthenticatedUser` / `requireAdminUser`.
+
+#### Step 7.5.7: UI Updates & Component Tests (`src/tests/leaveUi.test.tsx`)
+- [ ] Update `src/components/leaves/LeaveRequestModal.tsx` to dynamically render active leave types from `/api/leave-types` and show live remaining balance / unpaid indicator.
+- [ ] Update `src/components/leaves/LeaveHistoryList.tsx` to render dynamic balance cards (`Entitled`, `Carry-Forward`, `Adjusted`, `Used`, `Pending`, `Remaining`).
+- [ ] Create `src/components/leaves/AdminLeaveTypesManager.tsx` and `src/components/leaves/AdminLeaveBalancesManager.tsx`, and wire tabs into `src/app/(admin)/admin/leaves/page.tsx` (`Leave Requests`, `Leave Types`, `Employee Balances`).
+- [ ] Update `src/components/attendance/AttendanceCalendar.tsx` and `src/components/attendance/DayDetailModal.tsx` to render `ANOMALY_STALE` badge cleanly.
+- [ ] Update `src/tests/leaveUi.test.tsx` (RED $\rightarrow$ GREEN) verifying dynamic leave type dropdowns, balance breakdown cards, admin type CRUD, and admin quota adjustment/carry-forward triggers.
+
+#### Step 7.5.8: Full Regression & Cross-Repo Verification
+- [ ] Run `npm run ci:quality` (`npm run typecheck && npm run lint && npm run db:verify-migrations && npm run test:run && npm run build`) ensuring 100% pass.
+
+#### Phase 7.5 Verification Chain
+Admin opens `/admin/leaves` $\rightarrow$ Creates new leave type `BEREAVEMENT` (`5` days/yr, paid) in `Leave Types` tab without any database migration $\rightarrow$ Opens `Employee Balances` tab, sets custom quota / `+2` adjustment for a broker, and runs year-end carry-forward rollover $\rightarrow$ Broker opens `/leaves` $\rightarrow$ Sees `BEREAVEMENT` and updated `Carry-Forward` / `Adjusted` / `Remaining` cards $\rightarrow$ Submits a `CASUAL` leave exceeding remaining days and receives `400 LV_INSUFFICIENT_BALANCE`, then submits within balance (`201`) $\rightarrow$ Admin approves $\rightarrow$ Balance deducts and `hrm_attendance_records` marks `LV` $\rightarrow$ `npm run ci:quality` runs `verify-hrm-migrations.mjs` and passes 100% $\rightarrow$ ✅ Phase 7.5 Complete.
+
+---
+
+## 11. High-Level Phase Specifications (Phases 8 through 10)
 
 ### Phase 8: Admin Attendance Command Center & Regularization
 - **Goal:** Operational control room for leadership featuring real-time KPI counts, live company roster table with inline break drawers, and regularizations with mandatory audit logging.

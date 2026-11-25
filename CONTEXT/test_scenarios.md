@@ -30,6 +30,11 @@ All API endpoints and form validations must return standardized JSON error envel
 | `LV_INVALID_DATE_RANGE` | 400 | `"End date cannot be earlier than start date."` | Leave request with `endDate < startDate` |
 | `LV_OVERLAPPING_REQUEST` | 409 | `"You already have an active or pending leave request covering these dates."` | Overlapping leave application |
 | `LV_EMPTY_REASON` | 400 | `"A valid reason is required when submitting a leave request."` | Blank or whitespace-only reason |
+| `LV_INSUFFICIENT_BALANCE` | 400 | `"Insufficient leave balance for the requested dates."` | Paid leave exceeds available remaining balance |
+| `LV_TYPE_INACTIVE` | 400 | `"Selected leave type is inactive or unavailable."` | Submitting request for deactivated leave type |
+| `LV_TYPE_DUPLICATE` | 409 | `"A leave type with this code already exists."` | Admin creates duplicate leave type code |
+| `LV_TYPE_IN_USE` | 409 | `"Cannot delete a leave type that has existing requests or balances. Deactivate it instead."` | Admin tries to delete referenced leave type |
+| `LV_INVALID_ADJUSTMENT` | 400 | `"Adjustment would result in a negative total leave entitlement."` | Admin quota/adjustment yields `< 0` total entitlement |
 | `ADM_REGULARIZATION_REASON_REQUIRED` | 400 | `"A mandatory explanation is required to edit or regularize an attendance record."` | Admin edit submitted without explanation |
 | `SSO_TOKEN_EXPIRED` | 401 | `"The CRM access token has expired. Please launch CRM again from the portal."` | SSO JWT age $> 60$ seconds |
 | `SSO_TOKEN_INVALID` | 401 | `"Invalid authentication token signature."` | HMAC validation fails |
@@ -176,6 +181,21 @@ All API endpoints and form validations must return standardized JSON error envel
 - **Then:**
   - Leave status changes to `APPROVED`.
   - Attendance record for `"2026-12-05"` is automatically created/updated with `status = LV`.
+
+#### `TS-LV-004`: Dynamic Leave Types & Soft Deactivation
+- **Given:** Admin creates `BEREAVEMENT` (`5` days/yr, paid) and deactivates `SICK`.
+- **When:** Employee applies for `BEREAVEMENT` vs deactivated `SICK`.
+- **Then:** `BEREAVEMENT` succeeds (`201`); `SICK` fails (`400 LV_TYPE_INACTIVE`) while historical `SICK` records remain intact.
+
+#### `TS-LV-005`: Insufficient Balance Block & Unpaid Leave Bypass
+- **Given:** Employee has `2` remaining `CASUAL` days and `0` balance on unpaid `LWP` (`isPaid = false`).
+- **When:** Employee requests `3` `CASUAL` days vs `3` `LWP` days.
+- **Then:** `CASUAL` fails (`400 LV_INSUFFICIENT_BALANCE`); `LWP` succeeds (`201`).
+
+#### `TS-BAL-001`: Per-Employee Custom Quota, Adjustments & Carry-Forward Rollover
+- **Given:** Employee has `entitledDays = 15`, `used = 3`, `adjustedDays = 2` in `2026` on `PRIVILEGED` (`allowCarryForward = true`, `maxCarryForwardDays = 10`).
+- **When:** Admin runs carry-forward rollover from `2026` to `2027` twice (idempotency check).
+- **Then:** `2027` balance receives `carriedForwardDays = 10` (capped from `14` unused days) without double-counting on re-run.
 
 ---
 

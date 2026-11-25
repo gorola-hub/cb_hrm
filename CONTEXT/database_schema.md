@@ -18,9 +18,11 @@ Both CB CRM and CB HRM connect to the **same PostgreSQL database instance** (`cb
 | * roles                                    | * hrm_employee_shifts                      |
 | * designations                             | * hrm_attendance_records                   |
 | * permissions                              | * hrm_break_records                        |
-| * role_permissions                         | * hrm_leave_requests                       |
-| * allowed_ips                              | * hrm_holidays                             |
-| * customers, carriers, shipments, ...      | * hrm_attendance_audit_logs                |
+| * role_permissions                         | * hrm_leave_types                          |
+| * allowed_ips                              | * hrm_leave_balances                       |
+| * customers, carriers, shipments, ...      | * hrm_leave_requests                       |
+|                                            | * hrm_holidays                             |
+|                                            | * hrm_attendance_audit_logs                |
 +--------------------------------------------+--------------------------------------------+
 ```
 
@@ -92,7 +94,7 @@ Master definitions of company shifts in Indian Standard Time (IST).
 | Column Name | Type | Constraints | Description |
 |---|---|---|---|
 | `id` | String | Primary Key, `@default(cuid())` | Unique shift record ID |
-| `code` | Enum (`ShiftCode`) | Unique | `SHIFT_1700`, `SHIFT_1730`, `SHIFT_1800`, `SHIFT_1830`, `SHIFT_1900`, `SHIFT_1930` |
+| `code` | String | Unique | Dynamic shift code (`SHIFT_1700`–`SHIFT_1930` or custom Admin-defined codes) |
 | `displayName` | String | Non-null | User-facing shift label, e.g. `"19:00 - 03:30 IST"` |
 | `startTime` | String | Non-null | 24-hr scheduled start time in IST (`"19:00"`) |
 | `durationMins` | Integer | Non-null, Default: `510` | Standard shift window in minutes (8.5 hours) |
@@ -136,7 +138,7 @@ Core daily attendance record capturing punch events, hours worked, and status st
 | `netWorkMinutes` | Integer | Non-null, Default: `0` | `grossMinutes - totalBreakMinutes` |
 | `isLate` | Boolean | Non-null, Default: `false` | True if punched in $> 15$ mins after shift start |
 | `lateMinutes` | Integer | Non-null, Default: `0` | Minutes late beyond scheduled shift start |
-| `status` | Enum (`AttendanceStatus`)| Non-null, Default: `IN_PROGRESS` | `IN_PROGRESS`, `P` (Present), `HD` (Half Day), `A` (Absent), `WO` (Week Off), `LV` (Leave) |
+| `status` | Enum (`AttendanceStatus`)| Non-null, Default: `IN_PROGRESS` | `IN_PROGRESS`, `P` (Present), `HD` (Half Day), `A` (Absent), `WO` (Week Off), `LV` (Leave), `ANOMALY_STALE` (Stale >16h shift) |
 | `isRegularized` | Boolean | Non-null, Default: `false` | True if edited manually by an Administrator |
 | `createdAt` | DateTime | Default: `now()` | Timestamp |
 | `updatedAt` | DateTime | Non-null, `@updatedAt` | Timestamp |
@@ -163,14 +165,52 @@ Tracks individual break intervals for an attendance shift. Enables unlimited bre
 
 ---
 
-### 4.5 `hrm_leave_requests`
+### 4.5 `hrm_leave_types`
+Dynamic master catalog of company leave types managed by Administrators.
+
+| Column Name | Type | Constraints | Description |
+|---|---|---|---|
+| `id` | String | Primary Key, `@default(cuid())` | Unique leave type ID |
+| `code` | String | Unique, Non-null | Uppercase identifier (e.g., `"CASUAL"`, `"SICK"`, `"PRIVILEGED"`, `"BEREAVEMENT"`) |
+| `name` | String | Non-null | Display name (e.g., `"Casual Leave"`) |
+| `description` | String | Nullable | Policy summary |
+| `defaultAnnualDays` | Float | Non-null, Default: `12` | Default yearly entitlement for newly provisioned employees |
+| `allowCarryForward` | Boolean | Non-null, Default: `false` | Whether unused days roll into the next calendar year |
+| `maxCarryForwardDays` | Float | Non-null, Default: `0` | Cap on days carried forward per year |
+| `isPaid` | Boolean | Non-null, Default: `true` | If `false` (e.g. LWP), requests bypass balance limits |
+| `isActive` | Boolean | Non-null, Default: `true` | Inactive types reject new applications while preserving history |
+| `createdAt` / `updatedAt` | DateTime | Audit timestamps | Timestamps |
+
+---
+
+### 4.6 `hrm_leave_balances`
+Per-employee, per-year, per-leave-type quota and adjustment ledger.
+
+| Column Name | Type | Constraints | Description |
+|---|---|---|---|
+| `id` | String | Primary Key, `@default(cuid())` | Unique balance record ID |
+| `userId` | String | FK $\rightarrow$ `users.id`, `onDelete: Cascade` | Employee ID |
+| `leaveTypeId` | String | FK $\rightarrow$ `hrm_leave_types.id` | Leave type ID |
+| `year` | Integer | Non-null | Calendar year in IST (e.g., `2026`) |
+| `entitledDays` | Float | Non-null | Base or custom annual quota for this employee |
+| `carriedForwardDays` | Float | Non-null, Default: `0` | Unused days carried over from `year - 1` |
+| `adjustedDays` | Float | Non-null, Default: `0` | Admin manual +/- adjustment |
+| `notes` | String | Nullable | Reason/context for custom quota or adjustment |
+| `createdAt` / `updatedAt` | DateTime | Audit timestamps | Timestamps |
+
+- **Unique Constraints:** `@@unique([userId, leaveTypeId, year])`
+- **Indexes:** `@@index([userId, year])`
+
+---
+
+### 4.7 `hrm_leave_requests`
 Employee leave applications and administrative approval lifecycle.
 
 | Column Name | Type | Constraints | Description |
 |---|---|---|---|
 | `id` | String | Primary Key, `@default(cuid())` | Unique leave request ID |
 | `userId` | String | Foreign Key $\rightarrow$ `users.id`, `onDelete: Cascade` | Applicant employee ID |
-| `leaveType` | Enum (`LeaveType`)| Non-null | `CASUAL`, `SICK`, `PRIVILEGED` |
+| `leaveTypeId` | String | Foreign Key $\rightarrow$ `hrm_leave_types.id` | Referenced leave type |
 | `startDate` | String | Non-null | Format `"YYYY-MM-DD"` (inclusive start in IST) |
 | `endDate` | String | Non-null | Format `"YYYY-MM-DD"` (inclusive end in IST) |
 | `totalDays` | Integer | Non-null | Total working days covered (excluding weekends) |
@@ -248,6 +288,7 @@ model User {
   // HRM Native Relations
   employeeShifts      EmployeeShift[]
   attendanceRecords   AttendanceRecord[]
+  leaveBalances       LeaveBalance[]
   leaveRequests       LeaveRequest[]       @relation("EmployeeLeaves")
   reviewedLeaves      LeaveRequest[]       @relation("ReviewedLeaves")
   attendanceAuditLogs AttendanceAuditLog[] @relation("AdminAuditLogs")
@@ -301,15 +342,6 @@ model RolePermission {
 // HRM NATIVE MODELS (Managed by HRM migrations)
 // =============================================================
 
-enum ShiftCode {
-  SHIFT_1700
-  SHIFT_1730
-  SHIFT_1800
-  SHIFT_1830
-  SHIFT_1900
-  SHIFT_1930
-}
-
 enum AttendanceStatus {
   IN_PROGRESS
   P
@@ -317,12 +349,7 @@ enum AttendanceStatus {
   A
   WO
   LV
-}
-
-enum LeaveType {
-  CASUAL
-  SICK
-  PRIVILEGED
+  ANOMALY_STALE
 }
 
 enum LeaveStatus {
@@ -333,8 +360,8 @@ enum LeaveStatus {
 }
 
 model Shift {
-  id           String    @id @default(cuid())
-  code         ShiftCode @unique
+  id           String  @id @default(cuid())
+  code         String  @unique
   displayName  String
   startTime    String
   durationMins Int       @default(510)
@@ -412,26 +439,69 @@ model BreakRecord {
   @@map("hrm_break_records")
 }
 
-model LeaveRequest {
-  id         String      @id @default(cuid())
-  userId     String
-  leaveType  LeaveType
-  startDate  String
-  endDate    String
-  totalDays  Int
-  reason     String
-  status     LeaveStatus @default(PENDING)
-  reviewedBy String?
-  reviewedAt DateTime?
-  adminNotes String?
+model LeaveTypeConfig {
+  id                  String   @id @default(cuid())
+  code                String   @unique
+  name                String
+  description         String?
+  defaultAnnualDays   Float    @default(12)
+  allowCarryForward   Boolean  @default(false)
+  maxCarryForwardDays Float    @default(0)
+  isPaid              Boolean  @default(true)
+  isActive            Boolean  @default(true)
 
-  user     User  @relation("EmployeeLeaves", fields: [userId], references: [id], onDelete: Cascade)
-  reviewer User? @relation("ReviewedLeaves", fields: [reviewedBy], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  leaveRequests LeaveRequest[]
+  leaveBalances LeaveBalance[]
+
+  @@map("hrm_leave_types")
+}
+
+model LeaveBalance {
+  id                 String  @id @default(cuid())
+  userId             String
+  leaveTypeId        String
+  year               Int
+  entitledDays       Float
+  carriedForwardDays Float   @default(0)
+  adjustedDays       Float   @default(0)
+  notes              String?
+
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  leaveType LeaveTypeConfig @relation(fields: [leaveTypeId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, leaveTypeId, year])
+  @@index([userId, year])
+  @@map("hrm_leave_balances")
+}
+
+model LeaveRequest {
+  id          String      @id @default(cuid())
+  userId      String
+  leaveTypeId String
+  startDate   String
+  endDate     String
+  totalDays   Int
+  reason      String
+  status      LeaveStatus @default(PENDING)
+  reviewedBy  String?
+  reviewedAt  DateTime?
+  adminNotes  String?
+
+  user      User            @relation("EmployeeLeaves", fields: [userId], references: [id], onDelete: Cascade)
+  leaveType LeaveTypeConfig @relation(fields: [leaveTypeId], references: [id])
+  reviewer  User?           @relation("ReviewedLeaves", fields: [reviewedBy], references: [id])
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([userId, status])
+  @@index([leaveTypeId])
   @@index([status])
   @@map("hrm_leave_requests")
 }

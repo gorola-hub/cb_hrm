@@ -182,3 +182,23 @@ Remove `systemRole` from HRM's `model User` in `schema.prisma`. Fetch the user's
 #### Rationale
 - Prevents PostgreSQL runtime errors (`column users.systemRole does not exist`) and maintains 100% schema consistency with CRM.
 
+---
+
+### Decision 10: Dynamic Leave Types, Per-Employee Balances, Shift Code Strings & Symmetric Migration Safeguards
+
+**Date:** 2026-11-25  
+**Status:** Accepted  
+
+#### Context
+Early schema specifications modeled `LeaveType` (`CASUAL`, `SICK`, `PRIVILEGED`) and `ShiftCode` (`SHIFT_1700`–`SHIFT_1930`) as PostgreSQL enums and omitted per-employee leave balance storage and `ANOMALY_STALE` from `AttendanceStatus`. Additionally, both `cb_hrm` and `cb_crm` share the `public` schema in PostgreSQL (`cb_crm`), so running raw `prisma migrate dev` against the shared DB risks drift detection on the companion app's tables.
+
+#### Decision
+1. Replace the `LeaveType` enum with dynamic `hrm_leave_types` and `hrm_leave_balances` tables (`entitledDays`, `carriedForwardDays`, `adjustedDays`) so Admins can add/disable leave types, customize per-employee quotas, and run idempotent carry-forward rollovers with zero database migrations.
+2. Convert `hrm_shifts.code` from `ShiftCode` enum to `String @unique` so Phase 9 Shift Master can define arbitrary shift schedules without migrations.
+3. Keep `AttendanceStatus` and `LeaveStatus` as enums (fixed workflow FSMs) while adding missing `ANOMALY_STALE` to `AttendanceStatus`.
+4. Enforce shared-DB isolation in code across both repositories (**HRM Phase 7.5** & **CRM Phase 32**) via `scripts/verify-*-migrations.mjs` wired into `ci:quality` and `db:migrate` (`prisma migrate deploy` only, with no `migrate dev` script exposed).
+
+#### Rationale
+- Eliminates database migrations for HR policy changes (leave types, quotas, carry-forward, shifts).
+- Prevents accidental cross-app DDL mutations on shared PostgreSQL tables in CI and local development.
+

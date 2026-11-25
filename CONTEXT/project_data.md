@@ -91,6 +91,7 @@ Upon shift completion (`PUNCH_OUT`), the record's final status is calculated:
 | $\text{Net Work} < 300\text{ mins}$ ($< 5.0\text{ hrs}$) | `A` | Absent | Rose / Red | Insufficient hours worked |
 | Approved leave record covers `workDate` | `LV` | Approved Leave | Indigo Blue | Excused planned absence |
 | Saturday or Sunday without scheduled punch | `WO` | Week Off | Muted Slate | Standard company weekend |
+| Shift active $> 16$ hrs without punch-out | `ANOMALY_STALE` | Stale Shift | Rose / Alert | Flagged for Admin Regularization (`BR-IST-004`) |
 
 ---
 
@@ -111,9 +112,12 @@ Upon shift completion (`PUNCH_OUT`), the record's final status is calculated:
 
 ### 3.4 Leave Management & Admin Regularization
 
-#### Rule BR-LV-001: Leave Balance & Application
-- Employees submit leave requests specifying `LeaveType` (`CASUAL`, `SICK`, `PRIVILEGED`), start date, end date, and mandatory reason.
-- Overlapping active leave applications for the same date range are rejected.
+#### Rule BR-LV-001: Dynamic Leave Types, Per-Employee Balances & Application
+- Leave types (`CASUAL`, `SICK`, `PRIVILEGED`, and any Admin-created types) are stored dynamically in `hrm_leave_types` with configurable `defaultAnnualDays`, `allowCarryForward`, `maxCarryForwardDays`, `isPaid`, and `isActive` flags.
+- Per-employee annual quotas, carry-forward days, and manual admin adjustments are stored in `hrm_leave_balances` per `(userId, leaveTypeId, year)`.
+- Employees submit leave requests specifying an active `leaveTypeId`, start date, end date, and mandatory reason.
+- Paid leave applications exceeding available balance (`entitledDays + carriedForwardDays + adjustedDays - approvedUsed - pendingDays`) are rejected (`LV_INSUFFICIENT_BALANCE`). Unpaid (`isPaid = false`) leave types do not enforce a positive balance ceiling.
+- Overlapping active (`PENDING` or `APPROVED`) leave applications for the same date range are rejected (`LV_OVERLAPPING_REQUEST`).
 
 #### Rule BR-LV-002: Automatic Attendance Updating on Approval
 - When an Administrator approves a leave request (`status = APPROVED`), the system automatically ensures attendance records for all dates within the inclusive `[startDate, endDate]` range (excluding Saturdays/Sundays) are set to status `LV`.

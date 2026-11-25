@@ -10,9 +10,10 @@
     "test:run": "vitest run",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "ci:quality": "npm run typecheck && npm run lint && npm run test:run && npm run build",
+    "ci:quality": "npm run db:verify-migrations && npm run typecheck && npm run lint && npm run test:run && npm run build",
     "db:generate": "prisma generate",
-    "db:migrate": "prisma migrate dev",
+    "db:verify-migrations": "node scripts/verify-hrm-migrations.mjs",
+    "db:migrate": "npm run db:verify-migrations && prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
