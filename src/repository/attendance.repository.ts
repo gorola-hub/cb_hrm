@@ -74,6 +74,35 @@ export async function createAttendanceRecord(data: {
   });
 }
 
+export async function overrideLeaveAttendanceOnPunchIn(
+  id: string,
+  data: {
+    shiftId?: string | null;
+    firstPunchIn: Date;
+    isLate: boolean;
+    lateMinutes: number;
+  }
+) {
+  return prisma.attendanceRecord.update({
+    where: { id },
+    data: {
+      shiftId: data.shiftId ?? null,
+      firstPunchIn: data.firstPunchIn,
+      lastPunchOut: null,
+      grossMinutes: 0,
+      totalBreakMinutes: 0,
+      netWorkMinutes: 0,
+      isLate: data.isLate,
+      lateMinutes: data.lateMinutes,
+      status: 'IN_PROGRESS',
+    },
+    include: {
+      shift: true,
+      breaks: true,
+    },
+  });
+}
+
 export async function closeAttendanceRecord(
   id: string,
   data: {

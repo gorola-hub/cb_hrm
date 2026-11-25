@@ -1,11 +1,11 @@
 'use client';
 
-import React, { useState, useSyncExternalStore } from 'react';
+import React, { useEffect, useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { useTheme } from '@/components/providers/ThemeProvider';
-import { ExternalLink, Loader2 } from 'lucide-react';
+import { Bell, ExternalLink, Loader2 } from 'lucide-react';
 import { UserAvatarDropdown } from './UserAvatarDropdown';
 
 interface NavbarUser {
@@ -24,6 +24,7 @@ interface NavbarUser {
 
 interface NavbarProps {
   user: NavbarUser;
+  initialPendingLeaveCount?: number;
 }
 
 const emptySubscribe = () => () => {};
@@ -58,9 +59,36 @@ export function BrandLogo() {
   );
 }
 
-export function Navbar({ user }: NavbarProps) {
+export function Navbar({ user, initialPendingLeaveCount }: NavbarProps) {
   const pathname = usePathname();
   const [isOpeningCrm, setIsOpeningCrm] = useState(false);
+  const [pendingLeaveCount, setPendingLeaveCount] = useState(initialPendingLeaveCount ?? 0);
+  const isAdmin = user.role?.code === 'ADMIN';
+
+  useEffect(() => {
+    if (!isAdmin) return;
+
+    const refreshPendingCount = async () => {
+      try {
+        const res = await fetch('/api/admin/leaves?status=PENDING');
+        const json = await res.json();
+        if (res.ok && json.success && json.data) {
+          setPendingLeaveCount(json.data.pendingCount ?? 0);
+        }
+      } catch {
+        // Ignore transient network failures
+      }
+    };
+
+    if (initialPendingLeaveCount === undefined) {
+      refreshPendingCount();
+    }
+
+    window.addEventListener('hrm:leaves-updated', refreshPendingCount);
+    return () => {
+      window.removeEventListener('hrm:leaves-updated', refreshPendingCount);
+    };
+  }, [isAdmin, initialPendingLeaveCount]);
 
   const handleOpenCrm = async () => {
     if (isOpeningCrm) return;
@@ -104,6 +132,37 @@ export function Navbar({ user }: NavbarProps) {
           >
             Dashboard
           </Link>
+          <Link
+            href="/leaves"
+            className={`px-4 py-2 text-xs lg:text-sm tracking-wide rounded-full font-serif font-extrabold transition-all select-none shadow-md ${
+              pathname === '/leaves'
+                ? 'bg-zinc-900 text-[#ffd700] border border-amber-400/60'
+                : 'text-foreground hover:text-[#ffd700]'
+            }`}
+          >
+            Leaves
+          </Link>
+          {isAdmin && (
+            <Link
+              href="/admin/leaves"
+              className={`relative flex items-center gap-1.5 px-4 py-2 text-xs lg:text-sm tracking-wide rounded-full font-serif font-extrabold transition-all select-none shadow-md ${
+                pathname === '/admin/leaves'
+                  ? 'bg-zinc-900 text-[#ffd700] border border-amber-400/60'
+                  : 'text-foreground hover:text-[#ffd700]'
+              }`}
+            >
+              <Bell className="w-3.5 h-3.5" />
+              <span>Leave Approvals</span>
+              {pendingLeaveCount > 0 && (
+                <span
+                  aria-label={`${pendingLeaveCount} pending leave requests`}
+                  className="ml-0.5 inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full text-[11px] font-mono font-bold bg-[#ffd700] text-zinc-950"
+                >
+                  {pendingLeaveCount}
+                </span>
+              )}
+            </Link>
+          )}
         </nav>
 
         {/* Extreme Right: Open CRM Button (with black pill fill) & Profile Avatar Dropdown */}

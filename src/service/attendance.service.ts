@@ -3,6 +3,7 @@ import {
   findAttendanceByUserIdAndWorkDate,
   getUserActiveShift,
   createAttendanceRecord,
+  overrideLeaveAttendanceOnPunchIn,
   closeAttendanceRecord,
   findMonthlyAttendanceByUserId,
 } from '@/repository/attendance.repository';
@@ -48,9 +49,9 @@ export async function punchIn(userId: string, punchTime: Date = new Date()): Pro
   // 2. Anchor workDate to the IST calendar date of first punch-in (Rule BR-IST-001)
   const workDate = getISTDateString(punchTime);
 
-  // 3. Prevent duplicate attendance for the same workDate
+  // 3. Prevent duplicate attendance for the same workDate (Rule BR-LV-002: LV records may be overridden by punch-in)
   const existingRecordForDate = await findAttendanceByUserIdAndWorkDate(userId, workDate);
-  if (existingRecordForDate) {
+  if (existingRecordForDate && existingRecordForDate.status !== 'LV') {
     return {
       success: false,
       error: {
@@ -89,16 +90,24 @@ export async function punchIn(userId: string, punchTime: Date = new Date()): Pro
     lateMinutes = evaluation.lateMinutes;
   }
 
-  // 5. Create new attendance record
-  const record = await createAttendanceRecord({
-    userId,
-    shiftId: assignedShift?.id || null,
-    workDate,
-    firstPunchIn: punchTime,
-    isLate,
-    lateMinutes,
-    status: 'IN_PROGRESS',
-  });
+  // 5. Override approved leave record or create new attendance record
+  const record =
+    existingRecordForDate?.status === 'LV'
+      ? await overrideLeaveAttendanceOnPunchIn(existingRecordForDate.id, {
+          shiftId: assignedShift?.id || null,
+          firstPunchIn: punchTime,
+          isLate,
+          lateMinutes,
+        })
+      : await createAttendanceRecord({
+          userId,
+          shiftId: assignedShift?.id || null,
+          workDate,
+          firstPunchIn: punchTime,
+          isLate,
+          lateMinutes,
+          status: 'IN_PROGRESS',
+        });
 
   return {
     success: true,
@@ -209,7 +218,7 @@ export async function getTodayShiftState(userId: string) {
 
   const todayIST = getISTDateString();
   const todayRecord = await findAttendanceByUserIdAndWorkDate(userId, todayIST);
-  if (todayRecord) {
+  if (todayRecord && todayRecord.status !== 'LV') {
     return {
       state: 'COMPLETED',
       record: todayRecord,
@@ -218,7 +227,7 @@ export async function getTodayShiftState(userId: string) {
 
   return {
     state: 'IDLE',
-    record: null,
+    record: todayRecord ?? null,
   };
 }
 

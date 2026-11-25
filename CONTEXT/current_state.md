@@ -17,7 +17,7 @@ All phase execution adheres to the **TDD Phase Format** specified in [TDD_INSTRU
 | **Phase 4** | Unlimited Break Engine & State Machine | **[x] COMPLETED** | `src/repository/break.repository.ts`, `src/service/break.service.ts`, `src/app/api/attendance/break/` |
 | **Phase 5** | Employee Self-Service Dashboard & Calendar Grid | **[x] COMPLETED** | `src/components/attendance/LiveClock.tsx`, `src/components/attendance/PunchCard.tsx`, `src/components/attendance/AttendanceCalendar.tsx`, `src/app/(portal)/dashboard/page.tsx` |
 | **Phase 6** | Single Sign-On (SSO) Bridge to CRM, Federated Single Sign-Out (SLO) & UI Parity | **[x] COMPLETED** | `src/service/sso.service.ts`, `src/app/api/auth/sso/token/route.ts`, `src/app/api/auth/slo/route.ts`, `src/components/providers/SessionSyncProvider.tsx`, `src/components/providers/LenisProvider.tsx`, `src/components/layout/Navbar.tsx`, `src/components/layout/UserAvatarDropdown.tsx` |
-| **Phase 7** | Leave Management & Admin Approval Workflow | **[ ] PENDING** | `src/repository/leave.repository.ts`, `src/service/leave.service.ts`, `src/app/api/leaves/`, `src/components/leaves/` |
+| **Phase 7** | Leave Management & Admin Approval Workflow | **[x] COMPLETED** | `src/repository/leave.repository.ts`, `src/service/leave.service.ts`, `src/app/api/leaves/`, `src/app/api/admin/leaves/`, `src/components/leaves/` |
 | **Phase 8** | Admin Attendance Command Center & Regularization | **[ ] PENDING** | `src/repository/adminAttendance.repository.ts`, `src/service/adminAttendance.service.ts`, `src/app/(admin)/admin/attendance/page.tsx` |
 | **Phase 9** | Shift Master & Employee Shift Assignment | **[ ] PENDING** | `src/repository/shift.repository.ts`, `src/service/shift.service.ts`, `src/app/(admin)/admin/shifts/page.tsx` |
 | **Phase 10** | Production Deployment (Railway) & CI/CD Pipeline | **[ ] PENDING** | `.github/workflows/deploy-railway.yml`, Railway configuration, health check monitoring |
@@ -516,16 +516,114 @@ Following the completion of Phase 6, several critical architectural enhancements
 
 ---
 
-## 9. High-Level Phase Specifications (Phases 7 through 10)
+## 9. Phase 7: Leave Management & Admin Approval Workflow (Full TDD Format)
 
-### Phase 7: Leave Management & Admin Approval Workflow
-- **Goal:** Full leave application lifecycle: submission, balance display, admin notification bell, approval/rejection, and automatic attendance marking (`LV`).
-- **Target Files:** `src/repository/leave.repository.ts`, `src/service/leave.service.ts`, `src/app/api/leaves/`, `src/components/leaves/LeaveRequestModal.tsx`, `src/app/(admin)/admin/leaves/page.tsx`.
-- **Key Milestones:**
-  - Employee leave submission with date range and reason validation.
-  - Rejection of overlapping leave applications (`LV_OVERLAPPING_REQUEST`).
-  - Admin approval flow automatically setting target date records to `status = LV`.
-  - Admin rejection flow with mandatory explanation.
+#### Root Cause
+Employees need a structured, self-service workflow to apply for `CASUAL`, `SICK`, or `PRIVILEGED` leave with weekend-aware working-day calculation and overlap protection (Rule BR-LV-001, FR-LV-001). Administrators need real-time visibility into pending requests via a navigation notification badge (FR-LV-002) and the ability to approve or reject applications with audit metadata (`reviewedBy`, `reviewedAt`, `adminNotes`), automatically setting non-weekend attendance records in the approved range to `LV` while allowing an employee who later punches in on an approved leave date to override `LV` back to `IN_PROGRESS` (Rule BR-LV-002, FR-LV-003, FR-LV-004).
+
+#### Target Files
+- `src/repository/leave.repository.ts` — Prisma queries and transactional operations for `hrm_leave_requests` and `LV` attendance upserts
+- `src/repository/attendance.repository.ts` — Support updating an existing `LV` attendance record when overridden by `punchIn`
+- `src/service/leave.service.ts` — Leave submission validation (`LV_INVALID_DATE_RANGE`, `LV_EMPTY_REASON`, `LV_OVERLAPPING_REQUEST`), working-day counting, cancellation, balance/summary calculation, and transactional admin approve/reject workflows
+- `src/service/attendance.service.ts` — Update `punchIn` and `getTodayShiftState` so punching in on a date marked `LV` overrides `LV` to `IN_PROGRESS` per Rule BR-LV-002
+- `src/app/api/leaves/route.ts` — `GET /api/leaves` (personal history + balance summary) & `POST /api/leaves` (submit leave request)
+- `src/app/api/leaves/[id]/cancel/route.ts` — `POST /api/leaves/[id]/cancel` (cancel employee's own `PENDING` leave)
+- `src/app/api/admin/leaves/route.ts` — `GET /api/admin/leaves` (list company-wide leave requests with status filter & pending count)
+- `src/app/api/admin/leaves/[id]/approve/route.ts` — `POST /api/admin/leaves/[id]/approve` (approve leave & auto-mark `LV` attendance)
+- `src/app/api/admin/leaves/[id]/reject/route.ts` — `POST /api/admin/leaves/[id]/reject` (reject leave with mandatory explanation)
+- `src/components/leaves/LeaveRequestModal.tsx` — Employee modal form for applying for leave with live working-days preview
+- `src/components/leaves/LeaveHistoryList.tsx` — Personal leave balance cards, request list, status badges, and cancel action
+- `src/app/(portal)/leaves/page.tsx` — Employee Leave Management portal page
+- `src/components/leaves/AdminLeaveTable.tsx` — Admin leave review queue with filter tabs, approve action, and rejection reason modal
+- `src/app/(admin)/layout.tsx` & `src/app/(admin)/admin/leaves/page.tsx` — Admin-only route shell (`user.role.code === 'ADMIN'`) and Leave Approvals page
+- `src/components/layout/Navbar.tsx` — Add `Leaves` navigation link and Admin `Leave Approvals` link with live pending-requests badge (FR-LV-002)
+- `src/tests/leave.test.ts` — Service-layer unit/integration tests (`TS-LV-001`, `TS-LV-002`, `TS-LV-003`, `LV_*` error codes, BR-LV-002 punch-in override)
+- `src/tests/leaveRoute.test.ts` — API route integration tests for employee & admin leave endpoints
+- `src/tests/leaveUi.test.tsx` — UI component tests for `LeaveRequestModal`, `Navbar` admin pending badge, and `AdminLeaveTable`
+
+---
+
+### Phase 7 Checklist
+
+#### Step 7.1: RED State Test Creation for Leave Service (`src/tests/leave.test.ts`)
+- [x] Create `src/tests/leave.test.ts` asserting:
+  - `TS-LV-001`: Submitting `CASUAL` leave from `"2026-12-05"` to `"2026-12-07"` with reason `"Family wedding"` creates an `hrm_leave_requests` row with `status = "PENDING"` and `totalDays` excluding weekends (`Sat`/`Sun`).
+  - `LV_INVALID_DATE_RANGE`: Submitting a request where `endDate < startDate` returns `{ success: false, error: { code: "LV_INVALID_DATE_RANGE", message: "End date cannot be earlier than start date." } }`.
+  - `LV_EMPTY_REASON`: Submitting a blank or whitespace-only reason returns `{ success: false, error: { code: "LV_EMPTY_REASON", message: "A valid reason is required when submitting a leave request." } }`.
+  - `TS-LV-002`: Submitting a request overlapping an existing `PENDING` or `APPROVED` leave returns `{ success: false, error: { code: "LV_OVERLAPPING_REQUEST", message: "You already have an active or pending leave request covering these dates." } }`; cancelled/rejected requests do not block re-application.
+  - `TS-LV-003`: Admin approving a `PENDING` leave sets `status = "APPROVED"`, `reviewedBy`, `reviewedAt`, and creates/updates `hrm_attendance_records` with `status = "LV"` for all non-weekend dates in `[startDate, endDate]`.
+  - Admin rejecting a `PENDING` leave requires non-empty `adminNotes` (`LV_EMPTY_REASON`), sets `status = "REJECTED"`, `reviewedBy`, `reviewedAt`, `adminNotes`, and does NOT create `LV` attendance records.
+  - Employee cancelling their own `PENDING` leave transitions `status` to `"CANCELLED"`.
+  - Rule BR-LV-002 override: Calling `punchIn(userId, punchTime)` on a date that already has an `LV` attendance record overrides that record's status from `"LV"` to `"IN_PROGRESS"` with the real `firstPunchIn` and timeliness fields instead of returning `ATT_ALREADY_PUNCHED_IN`.
+- [x] Run `npm run test:run src/tests/leave.test.ts` $\rightarrow$ **CONFIRM RED** (Modules/functions do not exist).
+
+#### Step 7.2: Repository Layer Implementation (`src/repository/leave.repository.ts`, `src/repository/attendance.repository.ts`)
+- [x] Create `src/repository/leave.repository.ts` using Prisma (`hrm_leave_requests` & `hrm_attendance_records` only):
+  - `findOverlappingLeaves(userId: string, startDate: string, endDate: string)` checking `status: { in: ['PENDING', 'APPROVED'] }` and `startDate <= reqEndDate && endDate >= reqStartDate`.
+  - `createLeaveRequest(data)` creating an `hrm_leave_requests` row.
+  - `findLeavesByUserId(userId: string)` ordered by `createdAt: 'desc'` including reviewer info (`id`, `name`).
+  - `findLeaveById(id: string)` including applicant (`id`, `name`, `email`, `empId`, `role`) and reviewer.
+  - `findAllLeaves(filters?: { status?: LeaveStatus })` for admins ordered by `createdAt: 'desc'`.
+  - `countPendingLeaves()` returning total `PENDING` leave requests.
+  - `cancelLeaveRequest(id: string)` updating `status = 'CANCELLED'`.
+  - `approveLeaveInTransaction(id: string, adminId: string, workDates: string[], adminNotes?: string)` executing inside `prisma.$transaction`: updates leave to `APPROVED` (`reviewedBy`, `reviewedAt`, `adminNotes`) and upserts `hrm_attendance_records` (`status: 'LV'`) for each weekday in `workDates` (only overwriting if no active/completed punch record exists, or updating `status = 'LV'` when appropriate).
+  - `rejectLeaveRequest(id: string, adminId: string, adminNotes: string)` updating `status = 'REJECTED'`, `reviewedBy`, `reviewedAt`, `adminNotes`.
+- [x] In `src/repository/attendance.repository.ts`, add `overrideLeaveAttendanceOnPunchIn(id: string, data)` updating an `LV` record to `IN_PROGRESS` with `shiftId`, `firstPunchIn`, `isLate`, `lateMinutes`.
+
+#### Step 7.3: Service Layer Logic & GREEN State (`src/service/leave.service.ts`, `src/service/attendance.service.ts`)
+- [x] Create `src/service/leave.service.ts`:
+  - `calculateWorkingDays(startDate: string, endDate: string): number` & `enumerateWeekdays(startDate: string, endDate: string): string[]` evaluating YYYY-MM-DD dates in IST and excluding Saturdays/Sundays.
+  - `submitLeaveRequest(userId, input)` enforcing `LV_INVALID_DATE_RANGE`, `LV_EMPTY_REASON`, weekend/zero-working-day guard, and `LV_OVERLAPPING_REQUEST`.
+  - `getMyLeaves(userId)` returning leave requests plus annual leave entitlement & used/remaining balance summary by `LeaveType`.
+  - `cancelMyLeave(userId, leaveId)` verifying ownership and `PENDING` status.
+  - `listAdminLeaves(status?)` and `getPendingLeaveCount()`.
+  - `approveLeaveRequest(leaveId, adminId, adminNotes?)` enforcing `PENDING` state and invoking `approveLeaveInTransaction` across `enumerateWeekdays(startDate, endDate)`.
+  - `rejectLeaveRequest(leaveId, adminId, adminNotes)` enforcing `PENDING` state and non-empty `adminNotes`.
+- [x] Update `src/service/attendance.service.ts`:
+  - In `punchIn`, if `existingRecordForDate?.status === 'LV'`, override it to `IN_PROGRESS` via `overrideLeaveAttendanceOnPunchIn` instead of rejecting with `ATT_ALREADY_PUNCHED_IN`.
+  - In `getTodayShiftState`, if `todayRecord?.status === 'LV'`, allow `PunchCard` to show the leave notice while still permitting punch-in override.
+- [x] Run `npm run test:run src/tests/leave.test.ts` $\rightarrow$ **CONFIRM GREEN**.
+
+#### Step 7.4: API Route Handlers & Route Tests (`src/app/api/leaves/`, `src/app/api/admin/leaves/`, `src/tests/leaveRoute.test.ts`)
+- [x] Create `src/tests/leaveRoute.test.ts` (RED first, confirm failure) testing:
+  - Unauthenticated calls to `/api/leaves` and `/api/admin/leaves/*` return `401`.
+  - Non-admin (`BROKER`) calling `/api/admin/leaves`, `/api/admin/leaves/[id]/approve`, or `/api/admin/leaves/[id]/reject` returns `403` (`AUTH_FORBIDDEN`).
+  - `POST /api/leaves` returns `201` on valid request, `400` on invalid date range or empty reason, and `409` on overlapping leave (`TS-LV-002`).
+  - `GET /api/leaves` returns employee's requests and balance summary (`200`).
+  - `POST /api/leaves/[id]/cancel` cancels pending leave (`200`).
+  - `POST /api/admin/leaves/[id]/approve` approves leave as `ADMIN` (`200`) and creates `LV` attendance rows (`TS-LV-003`).
+  - `POST /api/admin/leaves/[id]/reject` rejects leave with `adminNotes` (`200`) and returns `400` if `adminNotes` is missing/blank.
+- [x] Implement routes with Zod validation, NextAuth `auth()` session checks, `session.user.role.code === 'ADMIN'` checks on `/api/admin/*`, and standardized `{ success, ... }` / `{ success: false, error: { code, message } }` JSON envelopes:
+  - `src/app/api/leaves/route.ts`
+  - `src/app/api/leaves/[id]/cancel/route.ts`
+  - `src/app/api/admin/leaves/route.ts`
+  - `src/app/api/admin/leaves/[id]/approve/route.ts`
+  - `src/app/api/admin/leaves/[id]/reject/route.ts`
+- [x] Run `npm run test:run src/tests/leaveRoute.test.ts` $\rightarrow$ **CONFIRM GREEN**.
+
+#### Step 7.5: Employee Leave Portal UI & Navbar Notification Badge
+- [x] Create `src/components/leaves/LeaveRequestModal.tsx` with `LeaveType` selector (`CASUAL`, `SICK`, `PRIVILEGED`), IST `startDate`/`endDate` inputs, live working-days calculation preview, mandatory reason textarea, and inline API error display.
+- [x] Create `src/components/leaves/LeaveHistoryList.tsx` displaying balance cards, status badges (`PENDING`, `APPROVED`, `REJECTED`, `CANCELLED`), admin review notes, and cancel button for `PENDING` requests.
+- [x] Create `src/app/(portal)/leaves/page.tsx` assembling the Leave Management header, `[Apply for Leave]` trigger, `LeaveRequestModal`, and `LeaveHistoryList`.
+- [x] Update `src/components/layout/Navbar.tsx` (and `(portal)/layout.tsx` if needed) to include:
+  - `Leaves` link (`/leaves`) for all authenticated users.
+  - Admin-only `Leave Approvals` link (`/admin/leaves`) with pending-request notification badge (`FR-LV-002`) when `user.role.code === 'ADMIN'`.
+
+#### Step 7.6: Admin Leave Approval Page & UI Component Tests
+- [x] Create `src/app/(admin)/layout.tsx` verifying session and redirecting non-`ADMIN` users to `/dashboard`.
+- [x] Create `src/components/leaves/AdminLeaveTable.tsx` showing filter tabs (`PENDING`, `APPROVED`, `REJECTED`, `ALL`), employee details (`name`, `empId`, `role`), leave dates, working days, reason, `[Approve]` action, and `[Reject]` modal requiring `adminNotes`.
+- [x] Create `src/app/(admin)/admin/leaves/page.tsx` rendering `AdminLeaveTable`.
+- [x] Create `src/tests/leaveUi.test.tsx` (RED $\rightarrow$ GREEN) verifying `LeaveRequestModal` validation/submission, `Navbar` pending badge rendering for `ADMIN` vs hidden for `BROKER`, and `AdminLeaveTable` approve/reject interactions.
+
+#### Step 7.7: Full Regression & Quality Verification
+- [x] Run `npm run ci:quality` (`npm run typecheck && npm run lint && npm run test:run && npm run build`) ensuring 0 errors/warnings and 100% test pass rate.
+
+#### Phase 7 Verification Chain
+Employee logs in $\rightarrow$ Navigates to `/leaves` $\rightarrow$ Clicks `[Apply for Leave]`, selects `CASUAL` for Mon–Wed, enters reason, and submits $\rightarrow$ `POST /api/leaves` creates `hrm_leave_requests` (`status = PENDING`, `totalDays = 3`) $\rightarrow$ Duplicate overlapping submission returns `409 LV_OVERLAPPING_REQUEST` $\rightarrow$ Admin logs in and sees pending count badge in `Navbar` $\rightarrow$ Admin opens `/admin/leaves` and clicks `[Approve]` $\rightarrow$ `POST /api/admin/leaves/[id]/approve` sets leave `APPROVED` (`reviewedBy`, `reviewedAt`) and marks all 3 weekdays in `hrm_attendance_records` as `status = LV` $\rightarrow$ Employee's `/dashboard` calendar renders `LV` badges for those dates, and if the employee punches in on one of those dates, `status` overrides cleanly to `IN_PROGRESS` $\rightarrow$ ✅ Phase 7 Complete.
+
+---
+
+## 10. High-Level Phase Specifications (Phases 8 through 10)
 
 ### Phase 8: Admin Attendance Command Center & Regularization
 - **Goal:** Operational control room for leadership featuring real-time KPI counts, live company roster table with inline break drawers, and regularizations with mandatory audit logging.
