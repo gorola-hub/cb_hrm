@@ -1,10 +1,43 @@
-import { PrismaClient, ShiftCode } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
+const MASTER_LEAVE_TYPES = [
+  {
+    code: 'CASUAL',
+    name: 'Casual Leave',
+    description: 'Personal or urgent time off',
+    defaultAnnualDays: 12,
+    allowCarryForward: false,
+    maxCarryForwardDays: 0,
+    isPaid: true,
+    isActive: true,
+  },
+  {
+    code: 'SICK',
+    name: 'Sick Leave',
+    description: 'Medical and health recovery leave',
+    defaultAnnualDays: 12,
+    allowCarryForward: false,
+    maxCarryForwardDays: 0,
+    isPaid: true,
+    isActive: true,
+  },
+  {
+    code: 'PRIVILEGED',
+    name: 'Privileged Leave',
+    description: 'Planned annual vacation leave with carry-forward',
+    defaultAnnualDays: 15,
+    allowCarryForward: true,
+    maxCarryForwardDays: 10,
+    isPaid: true,
+    isActive: true,
+  },
+];
+
 const MASTER_SHIFTS: Array<{
-  code: ShiftCode;
+  code: string;
   displayName: string;
   startTime: string;
   durationMins: number;
@@ -80,6 +113,21 @@ async function main() {
     console.log(`  ✓ Shift seeded: ${record.code} (${record.displayName})`);
   }
 
+  // 1b. Seed or Upsert Master Leave Types
+  const seededLeaveTypes = [];
+  for (const lt of MASTER_LEAVE_TYPES) {
+    const leaveType = await prisma.leaveTypeConfig.upsert({
+      where: { code: lt.code },
+      update: {
+        name: lt.name,
+        description: lt.description,
+      },
+      create: lt,
+    });
+    seededLeaveTypes.push(leaveType);
+    console.log(`  ✓ Leave type seeded: ${leaveType.code} (${leaveType.defaultAnnualDays}d)`);
+  }
+
   // 2. Check Roles (Create default roles only if completely empty / fresh DB)
   let adminRole = await prisma.role.findFirst({ where: { code: 'ADMIN' } });
   if (!adminRole) {
@@ -149,6 +197,33 @@ async function main() {
       console.log(`  ✓ Assigned SHIFT_1900 to development broker (${brokerEmail})`);
     }
   }
+
+  // 5. Ensure baseline current-year leave balances for active users without overwriting custom quotas
+  const currentYear = new Date().getUTCFullYear();
+  const activeUsers = await prisma.user.findMany({ where: { isActive: true }, select: { id: true } });
+  for (const u of activeUsers) {
+    for (const lt of seededLeaveTypes) {
+      await prisma.leaveBalance.upsert({
+        where: {
+          userId_leaveTypeId_year: {
+            userId: u.id,
+            leaveTypeId: lt.id,
+            year: currentYear,
+          },
+        },
+        update: {},
+        create: {
+          userId: u.id,
+          leaveTypeId: lt.id,
+          year: currentYear,
+          entitledDays: lt.defaultAnnualDays,
+          carriedForwardDays: 0,
+          adjustedDays: 0,
+        },
+      });
+    }
+  }
+  console.log(`  ✓ Provisioned baseline ${currentYear} leave balances for ${activeUsers.length} active user(s).`);
 
   console.log('✅ HRM Seed completed successfully!');
 }

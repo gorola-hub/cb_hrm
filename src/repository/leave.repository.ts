@@ -1,7 +1,19 @@
 import { prisma } from '@/lib/prisma';
-import { LeaveStatus, LeaveType } from '@prisma/client';
+import { LeaveStatus } from '@prisma/client';
 
 const leaveInclude = {
+  leaveType: {
+    select: {
+      id: true,
+      code: true,
+      name: true,
+      defaultAnnualDays: true,
+      allowCarryForward: true,
+      maxCarryForwardDays: true,
+      isPaid: true,
+      isActive: true,
+    },
+  },
   user: {
     select: {
       id: true,
@@ -44,9 +56,32 @@ export async function findOverlappingLeaves(userId: string, startDate: string, e
   });
 }
 
+export async function findActiveUserLeaveRequestsForYear(userId: string, year: number) {
+  const yearStart = `${year}-01-01`;
+  const yearEnd = `${year}-12-31`;
+  return prisma.leaveRequest.findMany({
+    where: {
+      userId,
+      status: {
+        in: ['PENDING', 'APPROVED'],
+      },
+      startDate: { lte: yearEnd },
+      endDate: { gte: yearStart },
+    },
+    select: {
+      id: true,
+      leaveTypeId: true,
+      startDate: true,
+      endDate: true,
+      totalDays: true,
+      status: true,
+    },
+  });
+}
+
 export async function createLeaveRequest(data: {
   userId: string;
-  leaveType: LeaveType;
+  leaveTypeId: string;
   startDate: string;
   endDate: string;
   totalDays: number;
@@ -55,7 +90,7 @@ export async function createLeaveRequest(data: {
   return prisma.leaveRequest.create({
     data: {
       userId: data.userId,
-      leaveType: data.leaveType,
+      leaveTypeId: data.leaveTypeId,
       startDate: data.startDate,
       endDate: data.endDate,
       totalDays: data.totalDays,
@@ -169,4 +204,3 @@ export async function rejectLeaveRequest(id: string, adminId: string, adminNotes
     include: leaveInclude,
   });
 }
-

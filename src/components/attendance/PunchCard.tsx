@@ -38,7 +38,7 @@ interface AttendanceRecord {
   netWorkMinutes: number;
   isLate: boolean;
   lateMinutes: number;
-  status: 'IN_PROGRESS' | 'P' | 'HD' | 'A' | 'WO' | 'LV';
+  status: 'IN_PROGRESS' | 'P' | 'HD' | 'A' | 'WO' | 'LV' | 'ANOMALY_STALE';
   shift?: Shift | null;
   breaks?: BreakRecord[];
 }

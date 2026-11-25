@@ -1,14 +1,25 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { CalendarPlus, Loader2, X, AlertCircle } from 'lucide-react';
 
-export type LeaveTypeOption = 'CASUAL' | 'SICK' | 'PRIVILEGED';
+export interface LeaveTypeItem {
+  id: string;
+  code: string;
+  name: string;
+  description?: string | null;
+  defaultAnnualDays: number;
+  allowCarryForward: boolean;
+  maxCarryForwardDays: number;
+  isPaid: boolean;
+  isActive: boolean;
+}
 
 interface LeaveRequestModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSubmitted: () => void;
+  leaveTypes?: LeaveTypeItem[];
 }
 
 function getDefaultISTDate(): string {
@@ -31,22 +42,55 @@ function countWeekdays(startDate: string, endDate: string): number {
   return count;
 }
 
-export function LeaveRequestModal({ isOpen, onClose, onSubmitted }: LeaveRequestModalProps) {
+export function LeaveRequestModal({
+  isOpen,
+  onClose,
+  onSubmitted,
+  leaveTypes: providedLeaveTypes,
+}: LeaveRequestModalProps) {
   const defaultDate = useMemo(() => getDefaultISTDate(), []);
-  const [leaveType, setLeaveType] = useState<LeaveTypeOption>('CASUAL');
+  const [fetchedTypes, setFetchedTypes] = useState<LeaveTypeItem[]>([]);
+  const [leaveTypeId, setLeaveTypeId] = useState('');
   const [startDate, setStartDate] = useState(defaultDate);
   const [endDate, setEndDate] = useState(defaultDate);
   const [reason, setReason] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const activeTypes = useMemo(() => {
+    const list = providedLeaveTypes ?? fetchedTypes;
+    return list.filter((t) => t.isActive);
+  }, [providedLeaveTypes, fetchedTypes]);
+
+  useEffect(() => {
+    if (!isOpen || providedLeaveTypes) return;
+    let cancelled = false;
+    fetch('/api/leave-types')
+      .then((res) => res.json())
+      .then((json) => {
+        if (!cancelled && json.success && Array.isArray(json.leaveTypes)) {
+          setFetchedTypes(json.leaveTypes);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, providedLeaveTypes]);
+
+  const effectiveLeaveTypeId =
+    leaveTypeId && activeTypes.some((t) => t.id === leaveTypeId)
+      ? leaveTypeId
+      : activeTypes[0]?.id ?? '';
+
+  const selectedType = activeTypes.find((t) => t.id === effectiveLeaveTypeId);
   const workingDays = useMemo(() => countWeekdays(startDate, endDate), [startDate, endDate]);
 
   if (!isOpen) return null;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (submitting) return;
+    if (submitting || !effectiveLeaveTypeId) return;
     setError(null);
     setSubmitting(true);
 
@@ -54,7 +98,12 @@ export function LeaveRequestModal({ isOpen, onClose, onSubmitted }: LeaveRequest
       const res = await fetch('/api/leaves', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ leaveType, startDate, endDate, reason }),
+        body: JSON.stringify({
+          leaveTypeId: effectiveLeaveTypeId,
+          startDate,
+          endDate,
+          reason,
+        }),
       });
       const json = await res.json();
 
@@ -116,14 +165,21 @@ export function LeaveRequestModal({ isOpen, onClose, onSubmitted }: LeaveRequest
             </label>
             <select
               id="leave-type"
-              value={leaveType}
-              onChange={(e) => setLeaveType(e.target.value as LeaveTypeOption)}
+              value={effectiveLeaveTypeId}
+              onChange={(e) => setLeaveTypeId(e.target.value)}
               className="w-full rounded-xl bg-secondary border border-border px-3.5 py-2.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-[#ffd700]/40"
             >
-              <option value="CASUAL">Casual Leave (CL)</option>
-              <option value="SICK">Sick Leave (SL)</option>
-              <option value="PRIVILEGED">Privileged Leave (PL)</option>
+              {activeTypes.map((lt) => (
+                <option key={lt.id} value={lt.id}>
+                  {lt.name} ({lt.code}){!lt.isPaid ? ' — Unpaid' : ''}
+                </option>
+              ))}
             </select>
+            {selectedType && !selectedType.isPaid && (
+              <p className="text-[11px] text-amber-500 dark:text-[#ffd700] mt-1 font-serif">
+                Unpaid leave type — does not require positive annual balance.
+              </p>
+            )}
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -196,7 +252,7 @@ export function LeaveRequestModal({ isOpen, onClose, onSubmitted }: LeaveRequest
             </button>
             <button
               type="submit"
-              disabled={submitting}
+              disabled={submitting || !effectiveLeaveTypeId}
               className="flex items-center gap-2 px-5 py-2 rounded-xl text-xs font-bold bg-zinc-900 text-[#ffd700] border border-amber-400/60 hover:bg-zinc-800 shadow-sm transition cursor-pointer disabled:opacity-50 font-serif"
             >
               {submitting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
@@ -208,4 +264,3 @@ export function LeaveRequestModal({ isOpen, onClose, onSubmitted }: LeaveRequest
     </div>
   );
 }
-

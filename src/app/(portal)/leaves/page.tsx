@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { CalendarPlus, Plane } from 'lucide-react';
-import { LeaveRequestModal } from '@/components/leaves/LeaveRequestModal';
+import { LeaveRequestModal, LeaveTypeItem } from '@/components/leaves/LeaveRequestModal';
 import {
   LeaveBalance,
   LeaveHistoryList,
@@ -13,19 +13,24 @@ export default function LeavesPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [requests, setRequests] = useState<LeaveRequestItem[]>([]);
-  const [balances, setBalances] = useState<Record<
-    'CASUAL' | 'SICK' | 'PRIVILEGED',
-    LeaveBalance
-  > | null>(null);
+  const [balances, setBalances] = useState<LeaveBalance[]>([]);
+  const [leaveTypes, setLeaveTypes] = useState<LeaveTypeItem[]>([]);
 
   const loadLeaves = useCallback(async () => {
     try {
       setLoading(true);
-      const res = await fetch('/api/leaves');
-      const json = await res.json();
-      if (res.ok && json.success && json.data) {
-        setRequests(json.data.requests);
-        setBalances(json.data.balances);
+      const [leavesRes, typesRes] = await Promise.all([
+        fetch('/api/leaves'),
+        fetch('/api/leave-types'),
+      ]);
+      const leavesJson = await leavesRes.json();
+      const typesJson = await typesRes.json();
+      if (leavesRes.ok && leavesJson.success && leavesJson.data) {
+        setRequests(leavesJson.data.requests);
+        setBalances(leavesJson.data.balances);
+      }
+      if (typesRes.ok && typesJson.success && Array.isArray(typesJson.leaveTypes)) {
+        setLeaveTypes(typesJson.leaveTypes);
       }
     } catch {
       // Handled gracefully
@@ -74,8 +79,8 @@ export default function LeavesPage() {
         isOpen={modalOpen}
         onClose={() => setModalOpen(false)}
         onSubmitted={loadLeaves}
+        leaveTypes={leaveTypes.length > 0 ? leaveTypes : undefined}
       />
     </div>
   );
 }
-

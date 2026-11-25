@@ -5,7 +5,11 @@ import { Check, X, Loader2, ShieldCheck, AlertCircle } from 'lucide-react';
 
 interface AdminLeaveItem {
   id: string;
-  leaveType: 'CASUAL' | 'SICK' | 'PRIVILEGED';
+  leaveType: {
+    id: string;
+    code: string;
+    name: string;
+  };
   startDate: string;
   endDate: string;
   totalDays: number;
@@ -175,7 +179,9 @@ export function AdminLeaveTable() {
                   <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-400/15 text-[#ffd700] border border-amber-400/30">
                     {item.user.role.code}
                   </span>
-                  <span className="text-xs font-bold text-foreground/90">{item.leaveType}</span>
+                  <span className="text-xs font-bold text-foreground/90">
+                    {item.leaveType.name} ({item.leaveType.code})
+                  </span>
                   <span className="text-xs font-mono text-muted-foreground">
                     {item.startDate === item.endDate
                       ? item.startDate
@@ -274,4 +280,3 @@ export function AdminLeaveTable() {
     </div>
   );
 }
-

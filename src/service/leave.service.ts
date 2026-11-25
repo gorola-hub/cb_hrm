@@ -1,4 +1,4 @@
-import { LeaveStatus, LeaveType } from '@prisma/client';
+import { LeaveStatus } from '@prisma/client';
 import {
   approveLeaveInTransaction,
   cancelLeaveRequest,
@@ -10,23 +10,12 @@ import {
   findOverlappingLeaves,
   rejectLeaveRequest as repoRejectLeaveRequest,
 } from '@/repository/leave.repository';
+import { findLeaveTypeByCode, findLeaveTypeById } from '@/repository/leaveType.repository';
+import {
+  enumerateWeekdaysByYear,
+  getEmployeeLeaveBalances,
+} from '@/service/leaveBalance.service';
 import { getISTDateString } from '@/lib/dateUtils';
-
-export const ANNUAL_LEAVE_ENTITLEMENT: Record<LeaveType, number> = {
-  CASUAL: 12,
-  SICK: 12,
-  PRIVILEGED: 15,
-};
-
-export interface LeaveBalanceItem {
-  leaveType: LeaveType;
-  entitled: number;
-  used: number;
-  pending: number;
-  remaining: number;
-}
-
-export type LeaveBalancesMap = Record<LeaveType, LeaveBalanceItem>;
 
 export type LeaveRecordWithUsers = Awaited<ReturnType<typeof findLeavesByUserId>>[number];
 
@@ -73,12 +62,13 @@ export function calculateWorkingDays(startDate: string, endDate: string): number
 }
 
 /**
- * Submits a new leave application for an employee after validating dates, reason, and overlaps.
+ * Submits a new leave application for an employee after validating dates, reason, type, overlaps, and balances.
  */
 export async function submitLeaveRequest(
   userId: string,
   input: {
-    leaveType: LeaveType;
+    leaveTypeId?: string;
+    leaveTypeCode?: string;
     startDate: string;
     endDate: string;
     reason: string;
@@ -118,6 +108,23 @@ export async function submitLeaveRequest(
     };
   }
 
+  const leaveType = input.leaveTypeId
+    ? await findLeaveTypeById(input.leaveTypeId)
+    : input.leaveTypeCode
+      ? await findLeaveTypeByCode(input.leaveTypeCode)
+      : null;
+
+  if (!leaveType || !leaveType.isActive) {
+    return {
+      success: false,
+      error: {
+        code: 'LV_TYPE_INACTIVE',
+        message: 'Selected leave type is inactive or unavailable.',
+        status: 400,
+      },
+    };
+  }
+
   const totalDays = calculateWorkingDays(input.startDate, input.endDate);
   if (totalDays <= 0) {
     return {
@@ -142,9 +149,29 @@ export async function submitLeaveRequest(
     };
   }
 
+  // Enforce balance per calendar year for paid leave types (unpaid types bypass balance cap)
+  if (leaveType.isPaid) {
+    const daysByYear = enumerateWeekdaysByYear(input.startDate, input.endDate);
+    for (const [year, daysNeeded] of daysByYear.entries()) {
+      const balances = await getEmployeeLeaveBalances(userId, year);
+      const bucket = balances.find((b) => b.leaveType.id === leaveType.id);
+      const available = bucket?.availableDays ?? 0;
+      if (daysNeeded > available) {
+        return {
+          success: false,
+          error: {
+            code: 'LV_INSUFFICIENT_BALANCE',
+            message: 'Insufficient leave balance for the requested dates.',
+            status: 400,
+          },
+        };
+      }
+    }
+  }
+
   const leave = await createLeaveRequest({
     userId,
-    leaveType: input.leaveType,
+    leaveTypeId: leaveType.id,
     startDate: input.startDate,
     endDate: input.endDate,
     totalDays,
@@ -155,48 +182,19 @@ export async function submitLeaveRequest(
 }
 
 /**
- * Returns an employee's leave request history and per-type balance summary for the current IST year.
+ * Returns an employee's leave request history and per-type balance summary for the requested IST year.
  */
-export async function getMyLeaves(userId: string) {
-  const requests = await findLeavesByUserId(userId);
-  const currentYear = getISTDateString().slice(0, 4);
-
-  const balances: LeaveBalancesMap = {
-    CASUAL: {
-      leaveType: 'CASUAL',
-      entitled: ANNUAL_LEAVE_ENTITLEMENT.CASUAL,
-      used: 0,
-      pending: 0,
-      remaining: ANNUAL_LEAVE_ENTITLEMENT.CASUAL,
-    },
-    SICK: {
-      leaveType: 'SICK',
-      entitled: ANNUAL_LEAVE_ENTITLEMENT.SICK,
-      used: 0,
-      pending: 0,
-      remaining: ANNUAL_LEAVE_ENTITLEMENT.SICK,
-    },
-    PRIVILEGED: {
-      leaveType: 'PRIVILEGED',
-      entitled: ANNUAL_LEAVE_ENTITLEMENT.PRIVILEGED,
-      used: 0,
-      pending: 0,
-      remaining: ANNUAL_LEAVE_ENTITLEMENT.PRIVILEGED,
-    },
-  };
-
-  for (const req of requests) {
-    if (!req.startDate.startsWith(currentYear)) continue;
-    const bucket = balances[req.leaveType];
-    if (req.status === 'APPROVED') {
-      bucket.used += req.totalDays;
-    } else if (req.status === 'PENDING') {
-      bucket.pending += req.totalDays;
-    }
-    bucket.remaining = Math.max(0, bucket.entitled - bucket.used);
-  }
+export async function getMyLeaves(
+  userId: string,
+  year: number = parseInt(getISTDateString().slice(0, 4), 10)
+) {
+  const [requests, balances] = await Promise.all([
+    findLeavesByUserId(userId),
+    getEmployeeLeaveBalances(userId, year),
+  ]);
 
   return {
+    year,
     requests,
     balances,
   };
@@ -249,7 +247,7 @@ export async function getPendingLeaveCount() {
 }
 
 /**
- * Approves a PENDING leave request and marks non-weekend attendance dates as LV inside a transaction.
+ * Approves a PENDING leave request (re-validating balance) and marks weekday attendance as LV inside a transaction.
  */
 export async function approveLeaveRequest(
   leaveId: string,
@@ -277,6 +275,25 @@ export async function approveLeaveRequest(
         status: 400,
       },
     };
+  }
+
+  if (existing.leaveType.isPaid) {
+    const daysByYear = enumerateWeekdaysByYear(existing.startDate, existing.endDate);
+    for (const [year, daysNeeded] of daysByYear.entries()) {
+      const balances = await getEmployeeLeaveBalances(existing.userId, year);
+      const bucket = balances.find((b) => b.leaveType.id === existing.leaveTypeId);
+      const remaining = bucket?.remainingDays ?? 0;
+      if (daysNeeded > remaining) {
+        return {
+          success: false,
+          error: {
+            code: 'LV_INSUFFICIENT_BALANCE',
+            message: 'Insufficient leave balance for the requested dates.',
+            status: 400,
+          },
+        };
+      }
+    }
   }
 
   const workDates = enumerateWeekdays(existing.startDate, existing.endDate);
@@ -336,4 +353,3 @@ export async function rejectLeaveRequest(
   const leave = await repoRejectLeaveRequest(leaveId, adminId, trimmedNotes);
   return { success: true, leave };
 }
-

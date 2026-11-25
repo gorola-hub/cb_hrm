@@ -35,6 +35,8 @@ export function DayDetailModal({ day, onClose }: DayDetailModalProps) {
         return { label: 'Week Off', color: 'bg-muted text-muted-foreground border border-border' };
       case 'IN_PROGRESS':
         return { label: 'In Progress', color: 'bg-blue-500/20 text-blue-500 dark:text-blue-400 border border-blue-500/30' };
+      case 'ANOMALY_STALE':
+        return { label: 'Stale Shift (>16h)', color: 'bg-rose-500/20 text-rose-400 border border-rose-500/40' };
       default:
         return { label: 'Unscheduled', color: 'bg-muted text-muted-foreground border border-border' };
     }

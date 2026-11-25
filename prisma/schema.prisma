@@ -27,6 +27,7 @@ model User {
   // HRM Native Relations
   employeeShifts      EmployeeShift[]
   attendanceRecords   AttendanceRecord[]
+  leaveBalances       LeaveBalance[]
   leaveRequests       LeaveRequest[]       @relation("EmployeeLeaves")
   reviewedLeaves      LeaveRequest[]       @relation("ReviewedLeaves")
   attendanceAuditLogs AttendanceAuditLog[] @relation("AdminAuditLogs")
@@ -80,15 +81,6 @@ model RolePermission {
 // HRM NATIVE MODELS (Managed by HRM migrations)
 // =============================================================
 
-enum ShiftCode {
-  SHIFT_1700
-  SHIFT_1730
-  SHIFT_1800
-  SHIFT_1830
-  SHIFT_1900
-  SHIFT_1930
-}
-
 enum AttendanceStatus {
   IN_PROGRESS
   P
@@ -96,12 +88,7 @@ enum AttendanceStatus {
   A
   WO
   LV
-}
-
-enum LeaveType {
-  CASUAL
-  SICK
-  PRIVILEGED
+  ANOMALY_STALE
 }
 
 enum LeaveStatus {
@@ -112,8 +99,8 @@ enum LeaveStatus {
 }
 
 model Shift {
-  id           String    @id @default(cuid())
-  code         ShiftCode @unique
+  id           String  @id @default(cuid())
+  code         String  @unique
   displayName  String
   startTime    String
   durationMins Int       @default(510)
@@ -191,26 +178,69 @@ model BreakRecord {
   @@map("hrm_break_records")
 }
 
-model LeaveRequest {
-  id         String      @id @default(cuid())
-  userId     String
-  leaveType  LeaveType
-  startDate  String
-  endDate    String
-  totalDays  Int
-  reason     String
-  status     LeaveStatus @default(PENDING)
-  reviewedBy String?
-  reviewedAt DateTime?
-  adminNotes String?
+model LeaveTypeConfig {
+  id                  String   @id @default(cuid())
+  code                String   @unique
+  name                String
+  description         String?
+  defaultAnnualDays   Float    @default(12)
+  allowCarryForward   Boolean  @default(false)
+  maxCarryForwardDays Float    @default(0)
+  isPaid              Boolean  @default(true)
+  isActive            Boolean  @default(true)
 
-  user     User  @relation("EmployeeLeaves", fields: [userId], references: [id], onDelete: Cascade)
-  reviewer User? @relation("ReviewedLeaves", fields: [reviewedBy], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  leaveRequests LeaveRequest[]
+  leaveBalances LeaveBalance[]
+
+  @@map("hrm_leave_types")
+}
+
+model LeaveBalance {
+  id                 String  @id @default(cuid())
+  userId             String
+  leaveTypeId        String
+  year               Int
+  entitledDays       Float
+  carriedForwardDays Float   @default(0)
+  adjustedDays       Float   @default(0)
+  notes              String?
+
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  leaveType LeaveTypeConfig @relation(fields: [leaveTypeId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, leaveTypeId, year])
+  @@index([userId, year])
+  @@map("hrm_leave_balances")
+}
+
+model LeaveRequest {
+  id          String      @id @default(cuid())
+  userId      String
+  leaveTypeId String
+  startDate   String
+  endDate     String
+  totalDays   Int
+  reason      String
+  status      LeaveStatus @default(PENDING)
+  reviewedBy  String?
+  reviewedAt  DateTime?
+  adminNotes  String?
+
+  user      User            @relation("EmployeeLeaves", fields: [userId], references: [id], onDelete: Cascade)
+  leaveType LeaveTypeConfig @relation(fields: [leaveTypeId], references: [id])
+  reviewer  User?           @relation("ReviewedLeaves", fields: [reviewedBy], references: [id])
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([userId, status])
+  @@index([leaveTypeId])
   @@index([status])
   @@map("hrm_leave_requests")
 }

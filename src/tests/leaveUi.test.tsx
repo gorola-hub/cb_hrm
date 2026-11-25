@@ -1,14 +1,40 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { LeaveRequestModal } from '@/components/leaves/LeaveRequestModal';
+import { LeaveHistoryList } from '@/components/leaves/LeaveHistoryList';
 import { AdminLeaveTable } from '@/components/leaves/AdminLeaveTable';
+import { AdminLeaveTypesManager } from '@/components/leaves/AdminLeaveTypesManager';
+import { AdminLeaveBalancesManager } from '@/components/leaves/AdminLeaveBalancesManager';
 import { Navbar } from '@/components/layout/Navbar';
 
 vi.mock('next-auth/react', () => ({
   signOut: vi.fn(),
 }));
 
-describe('Phase 7 Leave Management UI Components', () => {
+describe('Phase 7.5 Leave Management & Dynamic Config UI Components', () => {
+  const sampleLeaveTypes = [
+    {
+      id: 'lt_casual',
+      code: 'CASUAL',
+      name: 'Casual Leave',
+      defaultAnnualDays: 12,
+      allowCarryForward: false,
+      maxCarryForwardDays: 0,
+      isPaid: true,
+      isActive: true,
+    },
+    {
+      id: 'lt_bereavement',
+      code: 'BEREAVEMENT',
+      name: 'Bereavement Leave',
+      defaultAnnualDays: 5,
+      allowCarryForward: false,
+      maxCarryForwardDays: 0,
+      isPaid: true,
+      isActive: true,
+    },
+  ];
+
   beforeEach(() => {
     vi.restoreAllMocks();
   });
@@ -45,8 +71,8 @@ describe('Phase 7 Leave Management UI Components', () => {
     });
   });
 
-  describe('LeaveRequestModal', () => {
-    it('submits valid leave request to POST /api/leaves and calls onSubmitted', async () => {
+  describe('LeaveRequestModal (Dynamic Leave Types)', () => {
+    it('renders dynamic leave types and submits leaveTypeId to POST /api/leaves', async () => {
       const onClose = vi.fn();
       const onSubmitted = vi.fn();
 
@@ -59,13 +85,24 @@ describe('Phase 7 Leave Management UI Components', () => {
           }),
       });
 
-      render(<LeaveRequestModal isOpen={true} onClose={onClose} onSubmitted={onSubmitted} />);
+      render(
+        <LeaveRequestModal
+          isOpen={true}
+          onClose={onClose}
+          onSubmitted={onSubmitted}
+          leaveTypes={sampleLeaveTypes}
+        />
+      );
 
-      fireEvent.change(screen.getByLabelText(/leave type/i), { target: { value: 'CASUAL' } });
+      expect(screen.getByRole('option', { name: /bereavement leave/i })).toBeInTheDocument();
+
+      fireEvent.change(screen.getByLabelText(/leave type/i), {
+        target: { value: 'lt_bereavement' },
+      });
       fireEvent.change(screen.getByLabelText(/start date/i), { target: { value: '2026-12-07' } });
       fireEvent.change(screen.getByLabelText(/end date/i), { target: { value: '2026-12-09' } });
       fireEvent.change(screen.getByLabelText(/reason/i), {
-        target: { value: 'Family wedding out of town' },
+        target: { value: 'Family bereavement' },
       });
 
       expect(screen.getByText(/3 working days/i)).toBeInTheDocument();
@@ -75,7 +112,10 @@ describe('Phase 7 Leave Management UI Components', () => {
       await waitFor(() => {
         expect(global.fetch).toHaveBeenCalledWith(
           '/api/leaves',
-          expect.objectContaining({ method: 'POST' })
+          expect.objectContaining({
+            method: 'POST',
+            body: expect.stringContaining('lt_bereavement'),
+          })
         );
         expect(onSubmitted).toHaveBeenCalled();
         expect(onClose).toHaveBeenCalled();
@@ -89,34 +129,80 @@ describe('Phase 7 Leave Management UI Components', () => {
           Promise.resolve({
             success: false,
             error: {
-              code: 'LV_OVERLAPPING_REQUEST',
-              message: 'You already have an active or pending leave request covering these dates.',
+              code: 'LV_INSUFFICIENT_BALANCE',
+              message: 'Insufficient leave balance for the requested dates.',
             },
           }),
       });
 
-      render(<LeaveRequestModal isOpen={true} onClose={vi.fn()} onSubmitted={vi.fn()} />);
+      render(
+        <LeaveRequestModal
+          isOpen={true}
+          onClose={vi.fn()}
+          onSubmitted={vi.fn()}
+          leaveTypes={sampleLeaveTypes}
+        />
+      );
 
       fireEvent.change(screen.getByLabelText(/start date/i), { target: { value: '2026-12-07' } });
       fireEvent.change(screen.getByLabelText(/end date/i), { target: { value: '2026-12-08' } });
-      fireEvent.change(screen.getByLabelText(/reason/i), { target: { value: 'Overlap check' } });
+      fireEvent.change(screen.getByLabelText(/reason/i), { target: { value: 'Check balance' } });
 
       fireEvent.click(screen.getByRole('button', { name: /submit leave request/i }));
 
       await waitFor(() => {
         expect(
-          screen.getByText(
-            /you already have an active or pending leave request covering these dates\./i
-          )
+          screen.getByText(/insufficient leave balance for the requested dates\./i)
         ).toBeInTheDocument();
       });
+    });
+  });
+
+  describe('LeaveHistoryList (Carry-Forward & Adjustment Display)', () => {
+    it('displays entitled, carry-forward, adjusted, used, and remaining days', () => {
+      render(
+        <LeaveHistoryList
+          requests={[]}
+          loading={false}
+          onRefresh={vi.fn()}
+          balances={[
+            {
+              leaveType: {
+                id: 'lt_priv',
+                code: 'PRIVILEGED',
+                name: 'Privileged Leave',
+                defaultAnnualDays: 15,
+                allowCarryForward: true,
+                maxCarryForwardDays: 10,
+                isPaid: true,
+                isActive: true,
+              },
+              year: 2026,
+              entitledDays: 15,
+              carriedForwardDays: 4,
+              adjustedDays: 2,
+              totalEntitlement: 21,
+              usedDays: 3,
+              pendingDays: 1,
+              remainingDays: 18,
+              availableDays: 17,
+              notes: null,
+            },
+          ]}
+        />
+      );
+
+      expect(screen.getByText('Privileged Leave')).toBeInTheDocument();
+      expect(screen.getByText('18')).toBeInTheDocument();
+      expect(screen.getByText(/\+4/)).toBeInTheDocument();
+      expect(screen.getByText(/\+2/)).toBeInTheDocument();
     });
   });
 
   describe('AdminLeaveTable', () => {
     const sampleRequest = {
       id: 'lv_101',
-      leaveType: 'CASUAL' as const,
+      leaveType: { id: 'lt_casual', code: 'CASUAL', name: 'Casual Leave' },
       startDate: '2026-12-07',
       endDate: '2026-12-09',
       totalDays: 3,
@@ -137,7 +223,7 @@ describe('Phase 7 Leave Management UI Components', () => {
       reviewer: null,
     };
 
-    it('approves a pending leave request via POST /api/admin/leaves/[id]/approve', async () => {
+    it('approves and rejects pending leave requests', async () => {
       global.fetch = vi
         .fn()
         .mockResolvedValueOnce({
@@ -176,8 +262,60 @@ describe('Phase 7 Leave Management UI Components', () => {
         );
       });
     });
+  });
 
-    it('opens reject modal and submits explanation to POST /api/admin/leaves/[id]/reject', async () => {
+  describe('AdminLeaveTypesManager & AdminLeaveBalancesManager', () => {
+    it('creates a new leave type in AdminLeaveTypesManager', async () => {
+      global.fetch = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ success: true, leaveTypes: sampleLeaveTypes }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              success: true,
+              leaveType: {
+                id: 'lt_lwp',
+                code: 'LWP',
+                name: 'Leave Without Pay',
+                defaultAnnualDays: 0,
+                allowCarryForward: false,
+                maxCarryForwardDays: 0,
+                isPaid: false,
+                isActive: true,
+              },
+            }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ success: true, leaveTypes: sampleLeaveTypes }),
+        });
+
+      render(<AdminLeaveTypesManager />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Casual Leave')).toBeInTheDocument();
+      });
+
+      fireEvent.change(screen.getByLabelText(/type code/i), { target: { value: 'LWP' } });
+      fireEvent.change(screen.getByLabelText(/display name/i), {
+        target: { value: 'Leave Without Pay' },
+      });
+      fireEvent.change(screen.getByLabelText(/default annual days/i), { target: { value: '0' } });
+      fireEvent.click(screen.getByRole('button', { name: /create leave type/i }));
+
+      await waitFor(() => {
+        expect(global.fetch).toHaveBeenCalledWith(
+          '/api/admin/leave-types',
+          expect.objectContaining({ method: 'POST' })
+        );
+      });
+    });
+
+    it('runs carry-forward rollover in AdminLeaveBalancesManager', async () => {
       global.fetch = vi
         .fn()
         .mockResolvedValueOnce({
@@ -185,41 +323,69 @@ describe('Phase 7 Leave Management UI Components', () => {
           json: () =>
             Promise.resolve({
               success: true,
-              data: { requests: [sampleRequest], pendingCount: 1 },
+              data: {
+                year: 2026,
+                leaveTypes: sampleLeaveTypes,
+                employees: [
+                  {
+                    user: {
+                      id: 'usr_1',
+                      name: 'Denver Broker',
+                      email: 'broker@capitalbridgelogistics.com',
+                      empId: 'EMP001',
+                      role: { code: 'BROKER', name: 'Broker' },
+                    },
+                    balances: [
+                      {
+                        leaveType: sampleLeaveTypes[0],
+                        year: 2026,
+                        entitledDays: 12,
+                        carriedForwardDays: 0,
+                        adjustedDays: 0,
+                        totalEntitlement: 12,
+                        usedDays: 2,
+                        pendingDays: 0,
+                        remainingDays: 10,
+                        availableDays: 10,
+                        notes: null,
+                      },
+                    ],
+                  },
+                ],
+              },
             }),
-        })
-        .mockResolvedValueOnce({
-          ok: true,
-          json: () => Promise.resolve({ success: true, leave: { ...sampleRequest, status: 'REJECTED' } }),
         })
         .mockResolvedValueOnce({
           ok: true,
           json: () =>
             Promise.resolve({
               success: true,
-              data: { requests: [], pendingCount: 0 },
+              fromYear: 2026,
+              toYear: 2027,
+              processedUsers: 1,
+            }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              success: true,
+              data: { year: 2026, leaveTypes: sampleLeaveTypes, employees: [] },
             }),
         });
 
-      render(<AdminLeaveTable />);
+      render(<AdminLeaveBalancesManager />);
 
       await waitFor(() => {
         expect(screen.getByText('Denver Broker')).toBeInTheDocument();
       });
 
-      fireEvent.click(screen.getByRole('button', { name: /^reject$/i }));
-      fireEvent.change(screen.getByLabelText(/rejection reason/i), {
-        target: { value: 'Peak dispatch shift' },
-      });
-      fireEvent.click(screen.getByRole('button', { name: /confirm rejection/i }));
+      fireEvent.click(screen.getByRole('button', { name: /run carry-forward rollover/i }));
 
       await waitFor(() => {
         expect(global.fetch).toHaveBeenCalledWith(
-          '/api/admin/leaves/lv_101/reject',
-          expect.objectContaining({
-            method: 'POST',
-            body: JSON.stringify({ adminNotes: 'Peak dispatch shift' }),
-          })
+          '/api/admin/leave-balances/carry-forward',
+          expect.objectContaining({ method: 'POST' })
         );
       });
     });

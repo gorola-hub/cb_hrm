@@ -117,6 +117,12 @@ export function AttendanceCalendar({ refreshTrigger }: AttendanceCalendarProps) 
           title: 'Shift in Progress',
           className: 'bg-blue-500/20 text-blue-500 dark:text-blue-400 border border-blue-500/30 animate-pulse',
         };
+      case 'ANOMALY_STALE':
+        return {
+          label: 'STALE',
+          title: 'Stale Shift (>16h without punch-out — needs regularization)',
+          className: 'bg-rose-500/20 text-rose-400 border border-rose-500/40',
+        };
       default:
         return null;
     }

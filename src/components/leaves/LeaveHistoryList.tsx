@@ -2,18 +2,30 @@
 
 import React, { useState } from 'react';
 import { CalendarDays, Clock, CheckCircle2, XCircle, Ban, Loader2 } from 'lucide-react';
+import { LeaveTypeItem } from './LeaveRequestModal';
 
 export interface LeaveBalance {
-  leaveType: 'CASUAL' | 'SICK' | 'PRIVILEGED';
-  entitled: number;
-  used: number;
-  pending: number;
-  remaining: number;
+  leaveType: LeaveTypeItem;
+  year: number;
+  entitledDays: number;
+  carriedForwardDays: number;
+  adjustedDays: number;
+  totalEntitlement: number;
+  usedDays: number;
+  pendingDays: number;
+  remainingDays: number;
+  availableDays: number;
+  notes?: string | null;
 }
 
 export interface LeaveRequestItem {
   id: string;
-  leaveType: 'CASUAL' | 'SICK' | 'PRIVILEGED';
+  leaveType: {
+    id: string;
+    code: string;
+    name: string;
+    isPaid?: boolean;
+  };
   startDate: string;
   endDate: string;
   totalDays: number;
@@ -31,16 +43,10 @@ export interface LeaveRequestItem {
 
 interface LeaveHistoryListProps {
   requests: LeaveRequestItem[];
-  balances: Record<'CASUAL' | 'SICK' | 'PRIVILEGED', LeaveBalance> | null;
+  balances: LeaveBalance[];
   loading: boolean;
   onRefresh: () => void;
 }
-
-const LEAVE_LABELS: Record<'CASUAL' | 'SICK' | 'PRIVILEGED', string> = {
-  CASUAL: 'Casual Leave',
-  SICK: 'Sick Leave',
-  PRIVILEGED: 'Privileged Leave',
-};
 
 function getStatusBadge(status: LeaveRequestItem['status']) {
   switch (status) {
@@ -100,35 +106,57 @@ export function LeaveHistoryList({
 
   return (
     <div className="space-y-6">
-      {/* Balance Cards */}
-      {balances && (
+      {/* Dynamic Balance Cards */}
+      {balances.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {(['CASUAL', 'SICK', 'PRIVILEGED'] as const).map((type) => {
-            const b = balances[type];
-            return (
-              <div
-                key={type}
-                className="bg-card border border-border rounded-2xl p-5 shadow-lg card-noise space-y-3"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground font-serif">
-                    {LEAVE_LABELS[type]}
-                  </span>
-                  <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-amber-400/15 text-[#ffd700] border border-amber-400/30">
-                    {b.entitled} / yr
-                  </span>
-                </div>
-                <div className="flex items-baseline gap-2">
-                  <span className="text-3xl font-bold font-mono text-foreground">{b.remaining}</span>
-                  <span className="text-xs text-muted-foreground font-serif">days remaining</span>
-                </div>
-                <div className="flex items-center gap-4 text-xs text-muted-foreground border-t border-border pt-2.5">
-                  <span>Used: <strong className="text-foreground font-mono">{b.used}</strong></span>
-                  <span>Pending: <strong className="text-amber-500 dark:text-[#ffd700] font-mono">{b.pending}</strong></span>
-                </div>
+          {balances.map((b) => (
+            <div
+              key={b.leaveType.id}
+              className="bg-card border border-border rounded-2xl p-5 shadow-lg card-noise space-y-3"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground font-serif">
+                  {b.leaveType.name}
+                </span>
+                <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-amber-400/15 text-[#ffd700] border border-amber-400/30">
+                  {b.leaveType.isPaid ? `${b.entitledDays} / yr` : 'Unpaid'}
+                </span>
               </div>
-            );
-          })}
+              <div className="flex items-baseline gap-2">
+                <span className="text-3xl font-bold font-mono text-foreground">
+                  {b.leaveType.isPaid ? b.remainingDays : b.usedDays}
+                </span>
+                <span className="text-xs text-muted-foreground font-serif">
+                  {b.leaveType.isPaid ? 'days remaining' : 'days taken'}
+                </span>
+              </div>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground border-t border-border pt-2.5">
+                <span>
+                  Used: <strong className="text-foreground font-mono">{b.usedDays}</strong>
+                </span>
+                <span>
+                  Pending:{' '}
+                  <strong className="text-amber-500 dark:text-[#ffd700] font-mono">
+                    {b.pendingDays}
+                  </strong>
+                </span>
+                {b.carriedForwardDays > 0 && (
+                  <span>
+                    Carry-Fwd:{' '}
+                    <strong className="text-emerald-400 font-mono">+{b.carriedForwardDays}</strong>
+                  </span>
+                )}
+                {b.adjustedDays !== 0 && (
+                  <span>
+                    Adjusted:{' '}
+                    <strong className="text-indigo-400 font-mono">
+                      {b.adjustedDays > 0 ? `+${b.adjustedDays}` : b.adjustedDays}
+                    </strong>
+                  </span>
+                )}
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
@@ -172,7 +200,7 @@ export function LeaveHistoryList({
                   <div className="space-y-1.5">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-sm font-bold text-foreground font-serif">
-                        {LEAVE_LABELS[req.leaveType]}
+                        {req.leaveType.name}
                       </span>
                       <span
                         className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold border ${badge.className}`}
@@ -216,4 +244,3 @@ export function LeaveHistoryList({
     </div>
   );
 }
-
