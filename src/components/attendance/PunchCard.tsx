@@ -58,9 +58,11 @@ export function PunchCard({ onAttendanceUpdated }: PunchCardProps) {
   const [elapsedBreak, setElapsedBreak] = useState<string>('00:00:00');
 
   // Fetch current shift state
-  async function fetchCurrentState() {
+  async function fetchCurrentState(showLoading = true) {
     try {
-      setLoading(true);
+      if (showLoading) {
+        setLoading(true);
+      }
       setError(null);
       const res = await fetch('/api/attendance/today');
       const data = await res.json();
@@ -88,7 +90,9 @@ export function PunchCard({ onAttendanceUpdated }: PunchCardProps) {
     } catch {
       setError('Unable to load current attendance status.');
     } finally {
-      setLoading(false);
+      if (showLoading) {
+        setLoading(false);
+      }
     }
   }
 
@@ -120,7 +124,7 @@ export function PunchCard({ onAttendanceUpdated }: PunchCardProps) {
       return;
     }
 
-    const interval = setInterval(() => {
+    const updateTimers = () => {
       const now = Date.now();
       const punchInMs = new Date(attendance.firstPunchIn).getTime();
 
@@ -145,7 +149,10 @@ export function PunchCard({ onAttendanceUpdated }: PunchCardProps) {
         const currentBreakMs = Math.max(0, now - activeBreakStartMs);
         setElapsedBreak(formatMsToHMS(currentBreakMs));
       }
-    }, 1000);
+    };
+
+    updateTimers();
+    const interval = setInterval(updateTimers, 1000);
 
     return () => clearInterval(interval);
   }, [state, attendance, activeBreak]);
@@ -159,7 +166,7 @@ export function PunchCard({ onAttendanceUpdated }: PunchCardProps) {
       const data = await res.json();
 
       if (res.ok && data.success) {
-        setAttendance(data.data);
+        setAttendance(data.record ?? data.data ?? null);
         setState('WORKING');
         onAttendanceUpdated?.();
       } else {
@@ -180,9 +187,20 @@ export function PunchCard({ onAttendanceUpdated }: PunchCardProps) {
       const data = await res.json();
 
       if (res.ok && data.success) {
-        setActiveBreak(data.data);
+        const startedBreak = data.breakRecord ?? data.data ?? null;
+        setActiveBreak(startedBreak);
+        if (startedBreak) {
+          setAttendance((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  breaks: [...(prev.breaks ?? []), startedBreak],
+                }
+              : prev
+          );
+        }
         setState('ON_BREAK');
-        fetchCurrentState();
+        await fetchCurrentState(false);
         onAttendanceUpdated?.();
       } else {
         setError(data.error?.message || 'Failed to start break');
@@ -204,7 +222,7 @@ export function PunchCard({ onAttendanceUpdated }: PunchCardProps) {
       if (res.ok && data.success) {
         setActiveBreak(null);
         setState('WORKING');
-        fetchCurrentState();
+        await fetchCurrentState(false);
         onAttendanceUpdated?.();
       } else {
         setError(data.error?.message || 'Failed to end break');
@@ -224,7 +242,7 @@ export function PunchCard({ onAttendanceUpdated }: PunchCardProps) {
       const data = await res.json();
 
       if (res.ok && data.success) {
-        setAttendance(data.data);
+        setAttendance(data.record ?? data.data ?? null);
         setActiveBreak(null);
         setState('COMPLETED');
         onAttendanceUpdated?.();
