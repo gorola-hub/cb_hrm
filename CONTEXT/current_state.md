@@ -19,7 +19,7 @@ All phase execution adheres to the **TDD Phase Format** specified in [TDD_INSTRU
 | **Phase 6** | Single Sign-On (SSO) Bridge to CRM, Federated Single Sign-Out (SLO) & UI Parity | **[x] COMPLETED** | `src/service/sso.service.ts`, `src/app/api/auth/sso/token/route.ts`, `src/app/api/auth/slo/route.ts`, `src/components/providers/SessionSyncProvider.tsx`, `src/components/providers/LenisProvider.tsx`, `src/components/layout/Navbar.tsx`, `src/components/layout/UserAvatarDropdown.tsx` |
 | **Phase 7** | Leave Management & Admin Approval Workflow | **[x] COMPLETED** | `src/repository/leave.repository.ts`, `src/service/leave.service.ts`, `src/app/api/leaves/`, `src/app/api/admin/leaves/`, `src/components/leaves/` |
 | **Phase 7.5** | Dynamic Leave Types, Per-Employee Balances, Enum Hardening & Migration Safeguards *(Synced with CRM Phase 32)* | **[x] COMPLETED** | `prisma/schema.prisma`, `prisma/migrations/`, `scripts/verify-hrm-migrations.mjs`, `src/repository/leaveType.repository.ts`, `src/repository/leaveBalance.repository.ts`, `src/service/leaveType.service.ts`, `src/service/leaveBalance.service.ts`, `src/app/api/admin/leave-types/`, `src/app/api/admin/leave-balances/` |
-| **Phase 8** | Admin Attendance Command Center & Regularization | **[ ] PENDING** | `src/repository/adminAttendance.repository.ts`, `src/service/adminAttendance.service.ts`, `src/app/(admin)/admin/attendance/page.tsx` |
+| **Phase 8** | Admin Attendance Command Center & Regularization | **[x] COMPLETED** | `src/repository/adminAttendance.repository.ts`, `src/service/adminAttendance.service.ts`, `src/app/api/admin/attendance/`, `src/components/admin/LiveRosterTable.tsx`, `src/components/admin/AttendanceEditModal.tsx`, `src/app/(admin)/admin/attendance/page.tsx` |
 | **Phase 9** | Shift Master & Employee Shift Assignment | **[ ] PENDING** | `src/repository/shift.repository.ts`, `src/service/shift.service.ts`, `src/app/(admin)/admin/shifts/page.tsx` |
 | **Phase 10** | Production Deployment (Railway) & CI/CD Pipeline | **[ ] PENDING** | `.github/workflows/deploy-railway.yml`, Railway configuration, health check monitoring |
 
@@ -723,16 +723,92 @@ Admin opens `/admin/leaves` $\rightarrow$ Creates new leave type `BEREAVEMENT` (
 
 ---
 
-## 11. High-Level Phase Specifications (Phases 8 through 10)
+## 11. Phase 8: Admin Attendance Command Center & Regularization (Full TDD Format)
 
-### Phase 8: Admin Attendance Command Center & Regularization
-- **Goal:** Operational control room for leadership featuring real-time KPI counts, live company roster table with inline break drawers, and regularizations with mandatory audit logging.
-- **Target Files:** `src/repository/adminAttendance.repository.ts`, `src/service/adminAttendance.service.ts`, `src/components/admin/LiveRosterTable.tsx`, `src/components/admin/AttendanceEditModal.tsx`, `src/app/(admin)/admin/attendance/page.tsx`.
-- **Key Milestones:**
-  - KPI metric cards: *On Shift Now*, *On Break*, *Late Today*, *On Leave*, *Offline*.
-  - Live tabular roster with search, shift filtering, and department filtering.
-  - Regularization dialog requiring non-empty justification.
-  - Immutable audit logging to `hrm_attendance_audit_logs`.
+#### Root Cause
+Leadership and Administrators lack a centralized operational view of who is currently working, on break, late, on leave, offline, or stuck in a stale >16-hour shift (`FR-ADM-001`, `FR-ADM-002`, `BR-IST-004`). Additionally, when employees miss a punch-out or encounter system/connectivity issues, Administrators need a controlled regularization workflow to edit or create daily attendance records with a mandatory explanation that generates an immutable `AttendanceAuditLog` entry (`FR-ADM-003`, `FR-ADM-004`, `BR-REG-001`, `NFR-REL-003`, `TS-REG-001`, `TS-REG-002`, `TS-STALE-001`).
+
+#### Target Files
+- `src/repository/adminAttendance.repository.ts` — Batched company-wide roster queries (`users`, `hrm_attendance_records`, `hrm_break_records`, `hrm_employee_shifts`, `hrm_shifts`), stale-shift transition updates, transactional regularization + immutable `hrm_attendance_audit_logs` writes, and audit log history queries
+- `src/service/adminAttendance.service.ts` — `markStaleShifts` (>16h `IN_PROGRESS` $\rightarrow$ `ANOMALY_STALE`), `getLiveRoster` (KPI aggregations + multi-filter evaluation), `regularizeAttendance` (edit existing or create missing `workDate` record, auto-close open breaks on regularization, recalculate gross/net/status, enforce `ADM_REGULARIZATION_REASON_REQUIRED`), and `getAttendanceAuditLogs`
+- `src/app/api/admin/attendance/route.ts` — `GET /api/admin/attendance?date=YYYY-MM-DD&shiftId=...&roleCode=...&status=...&search=...` (`ADMIN` guarded)
+- `src/app/api/admin/attendance/regularize/route.ts` — `POST /api/admin/attendance/regularize` (`ADMIN` guarded, Zod validated)
+- `src/app/api/admin/attendance/[id]/audit-logs/route.ts` — `GET /api/admin/attendance/[id]/audit-logs` (`ADMIN` guarded)
+- `src/app/api/admin/attendance/stale-check/route.ts` — `POST /api/admin/attendance/stale-check` (`ADMIN` guarded manual/cron trigger for `markStaleShifts`)
+- `src/components/admin/LiveRosterTable.tsx` — Real-time KPI summary cards (*On Shift Now*, *On Break*, *Late Today*, *On Leave*, *Stale Anomalies*, *Offline*), filter bar, company roster table with inline expandable break drawers, audit trail drawer, and `[Regularize]` trigger
+- `src/components/admin/AttendanceEditModal.tsx` — Admin regularization modal allowing IST punch-in/punch-out editing, status selection or auto-recalculation, break override/summary, and mandatory explanation (`reason`)
+- `src/app/(admin)/admin/attendance/page.tsx` — Admin Attendance Command Center page
+- `src/components/layout/Navbar.tsx` — Add `ADMIN`-only `Attendance` link (`/admin/attendance`)
+- `src/tests/adminAttendance.test.ts` — Service-layer unit/integration tests (`TS-REG-001`, `TS-REG-002`, `TS-STALE-001`, KPI counts, filtering, missing-record regularization, open-break auto-close, audit immutability)
+- `src/tests/adminAttendanceRoute.test.ts` — Route integration tests for all `/api/admin/attendance/*` endpoints
+- `src/tests/adminAttendanceUi.test.tsx` — UI component tests for `LiveRosterTable`, `AttendanceEditModal`, and `Navbar` admin link
+
+---
+
+### Phase 8 Checklist
+
+#### Step 8.1: RED State Test Creation for Admin Attendance Service (`src/tests/adminAttendance.test.ts`)
+- [x] Create `src/tests/adminAttendance.test.ts` asserting:
+  - `TS-STALE-001`: `markStaleShifts(now)` transitions any `IN_PROGRESS` record whose `firstPunchIn` is `> 16` continuous hours before `now` (`lastPunchOut = null`) to `status = "ANOMALY_STALE"` without setting `lastPunchOut`, while leaving shifts `<= 16` hours untouched as `IN_PROGRESS`.
+  - `FR-ADM-001` / `FR-ADM-002`: `getLiveRoster({ date, shiftId, roleCode, status, search })` runs stale detection, returns accurate KPI metrics (`onShiftCount`, `onBreakCount`, `lateCount`, `onLeaveCount`, `staleCount`, `offlineCount`), classifies employees with no record as `OFFLINE` (or `WO` on weekends unless worked), and applies search/shift/role/status filters accurately.
+  - `TS-REG-001`: `regularizeAttendance(adminId, payload)` edits an existing attendance record (e.g., missed punch-out or `ANOMALY_STALE` $\rightarrow$ sets `lastPunchOut`, recalculates `grossMinutes` and `netWorkMinutes`, updates `status = "P"`), sets `isRegularized = true`, and creates an immutable `hrm_attendance_audit_logs` record containing `adminId`, `previousValues`, `newValues`, and `reason`.
+  - `TS-REG-002`: Calling `regularizeAttendance` with an empty or whitespace-only `reason` rejects with `{ success: false, error: { code: "ADM_REGULARIZATION_REASON_REQUIRED", message: "A mandatory explanation is required to edit or regularize an attendance record." } }`.
+  - Edge case — Missing record regularization: Regularizing an `OFFLINE` employee for a given `(userId, workDate)` creates the `hrm_attendance_records` row with `isRegularized = true` and logs `previousValues: { existed: false }` in `hrm_attendance_audit_logs`.
+  - Edge case — Open break auto-close on regularization: Regularizing an `IN_PROGRESS` / `ANOMALY_STALE` shift that still has an open `BreakRecord` (`breakEnd = null`) atomically closes the open break at `lastPunchOut` inside `prisma.$transaction` and sums break durations accurately.
+  - Edge case — Invalid timestamps: Regularizing with `lastPunchOut < firstPunchIn` rejects with `VALIDATION_ERROR` (400).
+- [x] Run `npm run test:run src/tests/adminAttendance.test.ts` $\rightarrow$ **CONFIRM RED** (Modules do not exist).
+
+#### Step 8.2: Admin Attendance Repository Layer (`src/repository/adminAttendance.repository.ts`)
+- [x] Implement `src/repository/adminAttendance.repository.ts` using Prisma (`hrm_*` mutations only; read-only queries on `users`, `roles`, `designations`):
+  - `findStaleInProgressRecords(cutoffUtc: Date)` and `markRecordsAsStale(ids: string[])` updating `status = 'ANOMALY_STALE'`.
+  - `findRosterSnapshotForDate(workDate: string)` executing parallel batched queries for active `users` (with `role`, `designation`), `hrm_attendance_records` for `workDate` (with `shift`, `breaks`, `_count.auditLogs`), and `hrm_employee_shifts` active on `workDate` (plus active master `hrm_shifts` catalog for filter dropdowns).
+  - `findAttendanceForRegularizationById(id: string)` and `findAttendanceForRegularizationByUserDate(userId: string, workDate: string)`.
+  - `regularizeAttendanceInTransaction(...)` executing inside `prisma.$transaction`: closes any open `hrm_break_records` if `lastPunchOut` is provided, creates or updates `hrm_attendance_records` (`isRegularized = true`), and inserts an immutable `hrm_attendance_audit_logs` row.
+  - `findAuditLogsByAttendanceId(attendanceRecordId: string)` ordered by `createdAt: 'desc'` including `admin` (`id`, `name`, `email`).
+
+#### Step 8.3: Admin Attendance Service Layer (`src/service/adminAttendance.service.ts`) & GREEN State
+- [x] Implement `src/service/adminAttendance.service.ts`:
+  - `markStaleShifts(referenceTime = new Date())`: Computes `16`-hour cutoff (`referenceTime - 16h`) and marks eligible `IN_PROGRESS` records as `ANOMALY_STALE`.
+  - `getLiveRoster(filters)`: Runs `markStaleShifts` when querying today's/current roster, classifies each employee's live state (`WORKING`, `ON_BREAK`, `ANOMALY_STALE`, `ON_LEAVE`, `COMPLETED`, `OFFLINE`), computes KPI totals prior to UI filter narrowing (or alongside filtered rows), and evaluates `search`, `shiftId`, `roleCode`, `designationCode`, and `status` filters.
+  - `regularizeAttendance(adminId, input)`: Enforces non-empty `reason` (`ADM_REGULARIZATION_REASON_REQUIRED`), validates IST timestamps (`lastPunchOut >= firstPunchIn`), recalculates `grossMinutes`, `totalBreakMinutes`, `netWorkMinutes`, evaluates or applies explicit `status` (`P`, `HD`, `A`, `LV`, `WO`), builds `previousValues` / `newValues` JSON snapshots, and executes `regularizeAttendanceInTransaction`.
+  - `getAttendanceAuditLogs(attendanceRecordId)`.
+- [x] Run `npm run test:run src/tests/adminAttendance.test.ts` $\rightarrow$ **CONFIRM GREEN**.
+
+#### Step 8.4: API Route Handlers & Route Tests (`src/app/api/admin/attendance/`, `src/tests/adminAttendanceRoute.test.ts`)
+- [x] Create `src/tests/adminAttendanceRoute.test.ts` (RED first, confirm failure) testing:
+  - Unauthenticated calls to `/api/admin/attendance/*` return `401` (`AUTH_UNAUTHORIZED`).
+  - Non-admin (`BROKER`) calls return `403` (`AUTH_FORBIDDEN`).
+  - `GET /api/admin/attendance?date=YYYY-MM-DD` returns `200` with `kpis`, `roster`, `shifts`, `roles` (and rejects invalid date format with `400`).
+  - `POST /api/admin/attendance/regularize` returns `200` on valid edit with audit log created (`TS-REG-001`), and `400 ADM_REGULARIZATION_REASON_REQUIRED` on blank reason (`TS-REG-002`).
+  - `GET /api/admin/attendance/[id]/audit-logs` returns chronological immutable audit trail (`200`).
+  - `POST /api/admin/attendance/stale-check` marks >16h stale shifts and returns updated count (`200`).
+- [x] Implement all 4 route handlers using `requireAdminUser()` and Zod validation:
+  - `src/app/api/admin/attendance/route.ts`
+  - `src/app/api/admin/attendance/regularize/route.ts`
+  - `src/app/api/admin/attendance/[id]/audit-logs/route.ts`
+  - `src/app/api/admin/attendance/stale-check/route.ts`
+- [x] Run `npm run test:run src/tests/adminAttendanceRoute.test.ts` $\rightarrow$ **CONFIRM GREEN**.
+
+#### Step 8.5: Command Center UI Components, Page & Navigation (`src/components/admin/`, `src/app/(admin)/admin/attendance/page.tsx`, `src/components/layout/Navbar.tsx`)
+- [x] Build `src/components/admin/AttendanceEditModal.tsx`:
+  - Displays employee metadata, `workDate`, IST punch-in/punch-out inputs, status override selector (`Auto-calculate` or explicit `P` / `HD` / `A` / `LV` / `WO`), mandatory `reason` textarea, and inline API error display.
+- [x] Build `src/components/admin/LiveRosterTable.tsx`:
+  - Top KPI cards (*On Shift Now*, *On Break*, *Late Today*, *On Leave*, *Stale Anomalies*, *Offline*).
+  - Filter toolbar: IST `date` picker, `search` input, `shift` selector, `role` selector, and `status` filter pills.
+  - Roster table with status/tardiness/regularized badges, inline expandable break timeline drawer, audit history drawer/modal, and `[Regularize]` action button.
+- [x] Build `src/app/(admin)/admin/attendance/page.tsx` assembling the Command Center header + `LiveRosterTable`.
+- [x] Update `src/components/layout/Navbar.tsx` to include the `ADMIN`-only `Attendance` link (`/admin/attendance`).
+- [x] Create `src/tests/adminAttendanceUi.test.tsx` (RED $\rightarrow$ GREEN) verifying KPI card counts, filter interactions, inline break drawer expansion, `AttendanceEditModal` regularization submission + error display, and `Navbar` admin link visibility.
+
+#### Step 8.6: Full Regression & Quality Verification
+- [x] Run `npm run ci:quality` (`npm run db:verify-migrations && npm run typecheck && npm run lint && npm run test:run && npm run build`) ensuring 100% pass rate across all suites.
+
+#### Phase 8 Verification Chain
+Broker forgets to punch out after 17 hours $\rightarrow$ Admin opens `/admin/attendance` (or triggers stale check) $\rightarrow$ System automatically transitions stale record to `ANOMALY_STALE` and highlights it in the *Stale Anomalies* KPI card and roster table $\rightarrow$ Admin filters roster, expands inline break drawer, and clicks `[Regularize]` $\rightarrow$ Enters verified IST punch-out time (`03:30`) and reason `"Home power cut verified with team lead"` $\rightarrow$ `POST /api/admin/attendance/regularize` closes any open break, recalculates `grossMinutes` / `netWorkMinutes` / `status = P`, sets `isRegularized = true`, and writes an immutable `hrm_attendance_audit_logs` entry $\rightarrow$ Roster refreshes showing `P` + `Regularized` badge and audit trail displays `previousValues` vs `newValues` $\rightarrow$ ✅ Phase 8 Complete.
+
+---
+
+## 12. High-Level Phase Specifications (Phases 9 through 10)
 
 ### Phase 9: Shift Master & Employee Shift Assignment
 - **Goal:** Shift management interface allowing administrators to define shift timings and assign employees with effective date ranges.

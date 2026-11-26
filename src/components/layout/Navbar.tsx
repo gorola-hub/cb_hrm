@@ -143,25 +143,37 @@ export function Navbar({ user, initialPendingLeaveCount }: NavbarProps) {
             Leaves
           </Link>
           {isAdmin && (
-            <Link
-              href="/admin/leaves"
-              className={`relative flex items-center gap-1.5 px-4 py-2 text-xs lg:text-sm tracking-wide rounded-full font-serif font-extrabold transition-all select-none shadow-md ${
-                pathname === '/admin/leaves'
-                  ? 'bg-zinc-900 text-[#ffd700] border border-amber-400/60'
-                  : 'text-foreground hover:text-[#ffd700]'
-              }`}
-            >
-              <Bell className="w-3.5 h-3.5" />
-              <span>Leave Approvals</span>
-              {pendingLeaveCount > 0 && (
-                <span
-                  aria-label={`${pendingLeaveCount} pending leave requests`}
-                  className="ml-0.5 inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full text-[11px] font-mono font-bold bg-[#ffd700] text-zinc-950"
-                >
-                  {pendingLeaveCount}
-                </span>
-              )}
-            </Link>
+            <>
+              <Link
+                href="/admin/attendance"
+                className={`px-4 py-2 text-xs lg:text-sm tracking-wide rounded-full font-serif font-extrabold transition-all select-none shadow-md ${
+                  pathname === '/admin/attendance'
+                    ? 'bg-zinc-900 text-[#ffd700] border border-amber-400/60'
+                    : 'text-foreground hover:text-[#ffd700]'
+                }`}
+              >
+                Attendance
+              </Link>
+              <Link
+                href="/admin/leaves"
+                className={`relative flex items-center gap-1.5 px-4 py-2 text-xs lg:text-sm tracking-wide rounded-full font-serif font-extrabold transition-all select-none shadow-md ${
+                  pathname === '/admin/leaves'
+                    ? 'bg-zinc-900 text-[#ffd700] border border-amber-400/60'
+                    : 'text-foreground hover:text-[#ffd700]'
+                }`}
+              >
+                <Bell className="w-3.5 h-3.5" />
+                <span>Leave Approvals</span>
+                {pendingLeaveCount > 0 && (
+                  <span
+                    aria-label={`${pendingLeaveCount} pending leave requests`}
+                    className="ml-0.5 inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full text-[11px] font-mono font-bold bg-[#ffd700] text-zinc-950"
+                  >
+                    {pendingLeaveCount}
+                  </span>
+                )}
+              </Link>
+            </>
           )}
         </nav>
 
