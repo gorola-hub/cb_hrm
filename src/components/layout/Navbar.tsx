@@ -155,6 +155,16 @@ export function Navbar({ user, initialPendingLeaveCount }: NavbarProps) {
                 Attendance
               </Link>
               <Link
+                href="/admin/shifts"
+                className={`px-4 py-2 text-xs lg:text-sm tracking-wide rounded-full font-serif font-extrabold transition-all select-none shadow-md ${
+                  pathname === '/admin/shifts'
+                    ? 'bg-zinc-900 text-[#ffd700] border border-amber-400/60'
+                    : 'text-foreground hover:text-[#ffd700]'
+                }`}
+              >
+                Shifts
+              </Link>
+              <Link
                 href="/admin/leaves"
                 className={`relative flex items-center gap-1.5 px-4 py-2 text-xs lg:text-sm tracking-wide rounded-full font-serif font-extrabold transition-all select-none shadow-md ${
                   pathname === '/admin/leaves'

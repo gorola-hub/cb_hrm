@@ -20,7 +20,7 @@ All phase execution adheres to the **TDD Phase Format** specified in [TDD_INSTRU
 | **Phase 7** | Leave Management & Admin Approval Workflow | **[x] COMPLETED** | `src/repository/leave.repository.ts`, `src/service/leave.service.ts`, `src/app/api/leaves/`, `src/app/api/admin/leaves/`, `src/components/leaves/` |
 | **Phase 7.5** | Dynamic Leave Types, Per-Employee Balances, Enum Hardening & Migration Safeguards *(Synced with CRM Phase 32)* | **[x] COMPLETED** | `prisma/schema.prisma`, `prisma/migrations/`, `scripts/verify-hrm-migrations.mjs`, `src/repository/leaveType.repository.ts`, `src/repository/leaveBalance.repository.ts`, `src/service/leaveType.service.ts`, `src/service/leaveBalance.service.ts`, `src/app/api/admin/leave-types/`, `src/app/api/admin/leave-balances/` |
 | **Phase 8** | Admin Attendance Command Center & Regularization | **[x] COMPLETED** | `src/repository/adminAttendance.repository.ts`, `src/service/adminAttendance.service.ts`, `src/app/api/admin/attendance/`, `src/components/admin/LiveRosterTable.tsx`, `src/components/admin/AttendanceEditModal.tsx`, `src/app/(admin)/admin/attendance/page.tsx` |
-| **Phase 9** | Shift Master & Employee Shift Assignment | **[ ] PENDING** | `src/repository/shift.repository.ts`, `src/service/shift.service.ts`, `src/app/(admin)/admin/shifts/page.tsx` |
+| **Phase 9** | Shift Master & Employee Shift Assignment | **[x] COMPLETED** | `src/repository/shift.repository.ts`, `src/service/shift.service.ts`, `src/app/api/admin/shifts/`, `src/app/api/admin/shift-assignments/`, `src/components/admin/ShiftMasterManager.tsx`, `src/components/admin/ShiftAssignmentModal.tsx`, `src/app/(admin)/admin/shifts/page.tsx` |
 | **Phase 10** | Production Deployment (Railway) & CI/CD Pipeline | **[ ] PENDING** | `.github/workflows/deploy-railway.yml`, Railway configuration, health check monitoring |
 
 ---
@@ -808,15 +808,76 @@ Broker forgets to punch out after 17 hours $\rightarrow$ Admin opens `/admin/att
 
 ---
 
-## 12. High-Level Phase Specifications (Phases 9 through 10)
+## 12. Phase 9: Shift Master & Employee Shift Assignment (Full TDD Format)
 
-### Phase 9: Shift Master & Employee Shift Assignment
-- **Goal:** Shift management interface allowing administrators to define shift timings and assign employees with effective date ranges.
-- **Target Files:** `src/repository/shift.repository.ts`, `src/service/shift.service.ts`, `src/components/admin/ShiftAssignmentModal.tsx`, `src/app/(admin)/admin/shifts/page.tsx`.
-- **Key Milestones:**
-  - Master shift catalog viewer with timing and grace period configuration.
-  - Employee shift assignment with `effectiveFrom` and `effectiveTo` history.
-  - Shift reassignment conflict validation.
+#### Root Cause
+Administrators currently have no self-service UI or API (`FR-ADM-005`) to manage master IST shift schedules (creating new shifts enabled by Phase 7.5's dynamic `Shift.code: String`, adjusting start times/durations/grace periods, or toggling availability) or to assign/reassign employees to shifts across effective date ranges (`hrm_employee_shifts`) with overlap conflict protection and historical auditability.
+
+#### Target Files
+- `src/repository/shift.repository.ts` — Prisma queries and transactions for `hrm_shifts` and `hrm_employee_shifts`
+- `src/repository/attendance.repository.ts` — Ensure `getUserActiveShift` respects `effectiveFrom <= now` as well as `effectiveTo`
+- `src/service/shift.service.ts` — Shift Master validation (`HH:mm` IST format, unique code normalization, duration/grace bounds) and employee shift assignment / overlap validation / auto-close reassignment
+- `src/app/api/admin/shifts/route.ts` — `GET /api/admin/shifts` & `POST /api/admin/shifts` (`ADMIN` guarded)
+- `src/app/api/admin/shifts/[id]/route.ts` — `PATCH /api/admin/shifts/[id]` (`ADMIN` guarded)
+- `src/app/api/admin/shift-assignments/route.ts` — `GET /api/admin/shift-assignments` & `POST /api/admin/shift-assignments` (`ADMIN` guarded)
+- `src/app/api/admin/shift-assignments/[id]/route.ts` — `PATCH` / `DELETE /api/admin/shift-assignments/[id]` (`ADMIN` guarded)
+- `src/components/admin/ShiftMasterManager.tsx` — Master shift catalog viewer with create/edit shift modal and active toggle
+- `src/components/admin/ShiftAssignmentModal.tsx` — Modal to assign/reassign an employee to a shift with `effectiveFrom`, optional `effectiveTo`, and `autoClosePrevious` toggle
+- `src/app/(admin)/admin/shifts/page.tsx` — Admin Shift Management page assembling Shift Master & Employee Shift Assignments
+- `src/components/layout/Navbar.tsx` — Add `ADMIN`-only `Shifts` link (`/admin/shifts`)
+- `src/tests/shift.test.ts` — Service-layer unit/integration tests for Shift Master CRUD, effective-date resolution, overlap detection, and auto-close reassignment
+- `src/tests/shiftRoute.test.ts` — Route integration tests for `/api/admin/shifts/*` and `/api/admin/shift-assignments/*`
+- `src/tests/shiftUi.test.tsx` — UI component tests for `ShiftMasterManager`, `ShiftAssignmentModal`, and `Navbar` link
+
+---
+
+### Phase 9 Checklist
+
+#### Step 9.1: RED State Test Creation for Shift Master & Assignment Service (`src/tests/shift.test.ts`)
+- [x] Create `src/tests/shift.test.ts` asserting:
+  - `listShifts()` returns all master shifts ordered by `startTime` with active employee assignment counts.
+  - `createShift(input)` normalizes `code` to uppercase (`SHIFT_2000`), validates `HH:mm` 24-hour `startTime`, `durationMins > 0`, `graceMinutes >= 0`, and rejects duplicate codes (`SHIFT_DUPLICATE`, 409) or invalid times (`VALIDATION_ERROR`, 400).
+  - `updateShift(id, input)` updates `displayName`, `startTime`, `durationMins`, `graceMinutes`, and `isActive`.
+  - `assignEmployeeShift(input)` creates an `hrm_employee_shifts` assignment; rejects inactive shifts (`SHIFT_INACTIVE`, 400) and `effectiveTo < effectiveFrom` (`VALIDATION_ERROR`, 400).
+  - Overlap validation: assigning an overlapping date range with `autoClosePrevious = false` rejects with `SHIFT_OVERLAPPING_ASSIGNMENT` (409).
+  - Reassignment with `autoClosePrevious = true`: atomically sets `effectiveTo = effectiveFrom` on the prior open-ended assignment inside `prisma.$transaction` and creates the new active assignment.
+  - Effective-date lookup: `getUserActiveShift(userId, atTime)` ignores future assignments (`effectiveFrom > atTime`) and expired assignments (`effectiveTo < atTime`).
+- [x] Run `npm run test:run src/tests/shift.test.ts` $\rightarrow$ **CONFIRM RED** (Modules do not exist).
+
+#### Step 9.2: Repository & Service Implementation (`src/repository/shift.repository.ts`, `src/service/shift.service.ts`, `src/repository/attendance.repository.ts`) & GREEN State
+- [x] Implement `src/repository/shift.repository.ts`:
+  - `findAllShiftsWithCounts()`, `findShiftById(id)`, `findShiftByCode(code)`, `createShiftRecord(data)`, `updateShiftRecord(id, data)`.
+  - `findEmployeeShiftAssignments(filters?: { userId?: string; shiftId?: string })` including `user` and `shift`.
+  - `findOverlappingEmployeeShifts(userId, effectiveFrom, effectiveTo, excludeId?)`.
+  - `assignShiftInTransaction(data)` closing prior open assignment if `autoClosePrevious` is true and inserting new `EmployeeShift`.
+  - `updateEmployeeShiftRecord(id, data)` and `deleteEmployeeShiftRecord(id)`.
+- [x] Update `getUserActiveShift` in `src/repository/attendance.repository.ts` to filter `effectiveFrom: { lte: referenceTime }`.
+- [x] Implement `src/service/shift.service.ts` enforcing all business rules and validations.
+- [x] Run `npm run test:run src/tests/shift.test.ts` $\rightarrow$ **CONFIRM GREEN**.
+
+#### Step 9.3: API Route Handlers & Route Tests (`src/app/api/admin/shifts/`, `src/app/api/admin/shift-assignments/`, `src/tests/shiftRoute.test.ts`)
+- [x] Create `src/tests/shiftRoute.test.ts` (RED $\rightarrow$ GREEN) verifying:
+  - `401` when unauthenticated and `403 AUTH_FORBIDDEN` for `BROKER`.
+  - `GET /api/admin/shifts`, `POST /api/admin/shifts`, `PATCH /api/admin/shifts/[id]`.
+  - `GET /api/admin/shift-assignments`, `POST /api/admin/shift-assignments` (including `409 SHIFT_OVERLAPPING_ASSIGNMENT` and `autoClosePrevious`), `PATCH / DELETE /api/admin/shift-assignments/[id]`.
+- [x] Implement all 4 route handlers with `requireAdminUser()` and Zod validation.
+
+#### Step 9.4: Shift Master & Assignment UI + Navigation + Tests (`src/components/admin/`, `src/app/(admin)/admin/shifts/page.tsx`, `src/tests/shiftUi.test.tsx`)
+- [x] Create `src/components/admin/ShiftMasterManager.tsx` (catalog list, create/edit shift modal, activate/deactivate toggle).
+- [x] Create `src/components/admin/ShiftAssignmentModal.tsx` (employee & shift selectors, `effectiveFrom`, optional `effectiveTo`, `autoClosePrevious` checkbox, inline error display).
+- [x] Create `src/app/(admin)/admin/shifts/page.tsx` assembling Shift Master + Employee Shift Assignments history & assignment trigger.
+- [x] Update `src/components/layout/Navbar.tsx` to add `ADMIN`-only `Shifts` link (`/admin/shifts`).
+- [x] Create `src/tests/shiftUi.test.tsx` (RED $\rightarrow$ GREEN) verifying Shift Master create/toggle, `ShiftAssignmentModal` submission/conflict display, and `Navbar` `Shifts` link visibility.
+
+#### Step 9.5: Full Regression & Quality Verification
+- [x] Run `npm run ci:quality` (`npm run db:verify-migrations && npm run typecheck && npm run lint && npm run test:run && npm run build`) ensuring 100% pass rate.
+
+#### Phase 9 Verification Chain
+Admin navigates to `/admin/shifts` $\rightarrow$ Creates custom shift `SHIFT_2000` (`20:00 - 04:30 IST`, `510` mins, `15` min grace) $\rightarrow$ Opens `[Assign Shift]` for a broker, selects `SHIFT_2000` effective today with `autoClosePrevious` enabled $\rightarrow$ Previous `SHIFT_1900` assignment receives `effectiveTo` and new `SHIFT_2000` assignment becomes active $\rightarrow$ Broker's `PunchCard` & `punchIn` immediately evaluate tardiness against `20:00 IST` $\rightarrow$ `npm run ci:quality` passes 100% $\rightarrow$ ✅ Phase 9 Complete.
+
+---
+
+## 13. High-Level Phase Specifications (Phase 10)
 
 ### Phase 10: Production Deployment (Railway) & CI/CD Pipeline
 - **Goal:** Provision HRM as a dedicated Web Service inside the Capital Bridge Railway project and configure GitHub Actions CI/CD.

@@ -33,11 +33,12 @@ export async function findAttendanceByUserIdAndWorkDate(userId: string, workDate
   });
 }
 
-export async function getUserActiveShift(userId: string) {
+export async function getUserActiveShift(userId: string, referenceTime: Date = new Date()) {
   const assignment = await prisma.employeeShift.findFirst({
     where: {
       userId,
-      OR: [{ effectiveTo: null }, { effectiveTo: { gte: new Date() } }],
+      effectiveFrom: { lte: referenceTime },
+      OR: [{ effectiveTo: null }, { effectiveTo: { gte: referenceTime } }],
     },
     orderBy: { effectiveFrom: 'desc' },
     include: {

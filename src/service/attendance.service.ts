@@ -62,7 +62,7 @@ export async function punchIn(userId: string, punchTime: Date = new Date()): Pro
   }
 
   // 4. Retrieve user's assigned shift schedule
-  const assignedShift = await getUserActiveShift(userId);
+  const assignedShift = await getUserActiveShift(userId, punchTime);
 
   let isLate = false;
   let lateMinutes = 0;
