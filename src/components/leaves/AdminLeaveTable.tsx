@@ -42,11 +42,13 @@ export function AdminLeaveTable() {
   const [rejectReason, setRejectReason] = useState('');
   const [error, setError] = useState<string | null>(null);
 
-  const fetchLeaves = useCallback(async (status: StatusFilter) => {
+  const fetchLeaves = useCallback(async (status: StatusFilter, showSpinner = true) => {
     try {
-      setLoading(true);
+      if (showSpinner) {
+        setLoading(true);
+      }
       setError(null);
-      const res = await fetch(`/api/admin/leaves?status=${status}`);
+      const res = await fetch(`/api/admin/leaves?status=${status}`, { cache: 'no-store' });
       const json = await res.json();
       if (res.ok && json.success && json.data) {
         setRequests(json.data.requests);
@@ -57,12 +59,30 @@ export function AdminLeaveTable() {
     } catch {
       setError('Network error loading leave requests.');
     } finally {
-      setLoading(false);
+      if (showSpinner) {
+        setLoading(false);
+      }
     }
   }, []);
 
   useEffect(() => {
-    fetchLeaves(filter);
+    fetchLeaves(filter, true);
+
+    const silentRefresh = () => {
+      if (document.visibilityState === 'visible') {
+        fetchLeaves(filter, false);
+      }
+    };
+
+    window.addEventListener('focus', silentRefresh);
+    document.addEventListener('visibilitychange', silentRefresh);
+    const interval = setInterval(silentRefresh, 15000);
+
+    return () => {
+      window.removeEventListener('focus', silentRefresh);
+      document.removeEventListener('visibilitychange', silentRefresh);
+      clearInterval(interval);
+    };
   }, [filter, fetchLeaves]);
 
   async function handleApprove(id: string) {

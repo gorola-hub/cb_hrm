@@ -112,11 +112,16 @@ Upon shift completion (`PUNCH_OUT`), the record's final status is calculated:
 
 ### 3.4 Leave Management & Admin Regularization
 
-#### Rule BR-LV-001: Dynamic Leave Types, Per-Employee Balances & Application
-- Leave types (`CASUAL`, `SICK`, `PRIVILEGED`, and any Admin-created types) are stored dynamically in `hrm_leave_types` with configurable `defaultAnnualDays`, `allowCarryForward`, `maxCarryForwardDays`, `isPaid`, and `isActive` flags.
-- Per-employee annual quotas, carry-forward days, and manual admin adjustments are stored in `hrm_leave_balances` per `(userId, leaveTypeId, year)`.
-- Employees submit leave requests specifying an active `leaveTypeId`, start date, end date, and mandatory reason.
-- Paid leave applications exceeding available balance (`entitledDays + carriedForwardDays + adjustedDays - approvedUsed - pendingDays`) are rejected (`LV_INSUFFICIENT_BALANCE`). Unpaid (`isPaid = false`) leave types do not enforce a positive balance ceiling.
+#### Rule BR-LV-001: Monthly Paid Leave Accrual, 3-Month Probation Cutoff & Leave Application
+- **Single Default Paid Leave (`PAID`):** Company leave policy uses **Paid Leave (`PAID`)** (`isPaid = true`) as the sole seeded leave type in `hrm_leave_types`, with configurable `allowCarryForward`, `maxCarryForwardDays`, and `isActive` flags manageable via the Admin Leave Types Edit UI. (Administrators may still create/disable custom types dynamically without migrations; inactive types are hidden on employee `/leaves` balance cards and blocked for new applications.)
+- **3-Month Probation & 15th-of-Month Cutoff (`users.dateOfJoining` in IST):**
+  - If `dateOfJoining` is on or before the **15th** of a month (`day <= 15`), the joining month counts as Month 1 of the 3-month waiting period; accrual begins on the 1st of **`joiningMonth + 3`** (e.g., joined Nov 1–15 → wait Nov, Dec, Jan → `+1` starts **Feb 1**).
+  - If `dateOfJoining` is after the **15th** (`day > 15`), the joining month does not count; accrual begins on the 1st of **`joiningMonth + 4`** (e.g., joined Nov 16–30 → wait Dec, Jan, Feb → `+1` starts **Mar 1**).
+  - Employees receive **`+1` Paid Leave on the 1st of each eligible month** in IST (max `12` accrued days per calendar year), plus any `carriedForwardDays` (if enabled) and manual Admin `adjustedDays` (+/-).
+  - If `dateOfJoining` is `null` in CRM, earned Paid Leave defaults to `0` and `/leaves` shows a warning prompting the employee to contact an Administrator.
+- **Leave-Month Balance Check & Immediate Deduction:**
+  - `/leaves` displays earned Paid Leave accrued up to the current IST month.
+  - Submitting and approving Paid Leave requests evaluates accrued Paid Leave up to the requested leave's `endDate` month for each calendar year segment (e.g., on Nov 28 with 2 accrued days so far, a `Nov 29 – Dec 1` 3-day request succeeds against December's 3-day cumulative accrual), immediately deducting from available/used balance (`LV_INSUFFICIENT_BALANCE` if insufficient; cancelling a `PENDING` request restores availability). Unpaid (`isPaid = false`) leave types, if created by Admin, bypass balance ceilings.
 - Overlapping active (`PENDING` or `APPROVED`) leave applications for the same date range are rejected (`LV_OVERLAPPING_REQUEST`).
 
 #### Rule BR-LV-002: Automatic Attendance Updating on Approval

@@ -21,6 +21,7 @@ All phase execution adheres to the **TDD Phase Format** specified in [TDD_INSTRU
 | **Phase 7.5** | Dynamic Leave Types, Per-Employee Balances, Enum Hardening & Migration Safeguards *(Synced with CRM Phase 32)* | **[x] COMPLETED** | `prisma/schema.prisma`, `prisma/migrations/`, `scripts/verify-hrm-migrations.mjs`, `src/repository/leaveType.repository.ts`, `src/repository/leaveBalance.repository.ts`, `src/service/leaveType.service.ts`, `src/service/leaveBalance.service.ts`, `src/app/api/admin/leave-types/`, `src/app/api/admin/leave-balances/` |
 | **Phase 8** | Admin Attendance Command Center & Regularization | **[x] COMPLETED** | `src/repository/adminAttendance.repository.ts`, `src/service/adminAttendance.service.ts`, `src/app/api/admin/attendance/`, `src/components/admin/LiveRosterTable.tsx`, `src/components/admin/AttendanceEditModal.tsx`, `src/app/(admin)/admin/attendance/page.tsx` |
 | **Phase 9** | Shift Master & Employee Shift Assignment | **[x] COMPLETED** | `src/repository/shift.repository.ts`, `src/service/shift.service.ts`, `src/app/api/admin/shifts/`, `src/app/api/admin/shift-assignments/`, `src/components/admin/ShiftMasterManager.tsx`, `src/components/admin/ShiftAssignmentModal.tsx`, `src/app/(admin)/admin/shifts/page.tsx` |
+| **Phase 9.5** | Monthly Paid Leave Accrual, 3-Month Probation Cutoff, Admin Carry-Forward Edit & Cross-Repo Docs | **[x] COMPLETED** | `prisma/schema.prisma`, `prisma/seed.ts`, `src/lib/dateUtils.ts`, `src/service/leaveBalance.service.ts`, `src/service/leave.service.ts`, `src/components/leaves/` |
 | **Phase 10** | Production Deployment (Railway) & CI/CD Pipeline | **[ ] PENDING** | `.github/workflows/deploy-railway.yml`, Railway configuration, health check monitoring |
 
 ---
@@ -874,6 +875,65 @@ Administrators currently have no self-service UI or API (`FR-ADM-005`) to manage
 
 #### Phase 9 Verification Chain
 Admin navigates to `/admin/shifts` $\rightarrow$ Creates custom shift `SHIFT_2000` (`20:00 - 04:30 IST`, `510` mins, `15` min grace) $\rightarrow$ Opens `[Assign Shift]` for a broker, selects `SHIFT_2000` effective today with `autoClosePrevious` enabled $\rightarrow$ Previous `SHIFT_1900` assignment receives `effectiveTo` and new `SHIFT_2000` assignment becomes active $\rightarrow$ Broker's `PunchCard` & `punchIn` immediately evaluate tardiness against `20:00 IST` $\rightarrow$ `npm run ci:quality` passes 100% $\rightarrow$ ✅ Phase 9 Complete.
+
+---
+
+## 12.5 Phase 9.5: Monthly Paid Leave Accrual, 3-Month Probation Cutoff, Admin Carry-Forward Edit & Cross-Repo Docs (Full TDD Format)
+
+#### Root Cause
+Upfront annual quotas across `CASUAL`, `SICK`, and `PRIVILEGED` leave types (`12/12/15` provisioned on Day 1) do not match company policy. Only one standard leave type (**Paid Leave**, code `PAID`) is used, credited incrementally at **`+1` day on the 1st of each eligible month** after a **3-month post-joining waiting period** governed by CRM's `users.dateOfJoining` (`<= 15th` starts on `joiningMonth + 3`; `> 15th` starts on `joiningMonth + 4`; `0` days with a UI prompt when `dateOfJoining` is `null`). Additionally, leave requests spanning month boundaries (e.g., `Nov 29 – Dec 1`) need validation evaluated up to the requested leave's month, Administrators need an inline **Edit** modal in `AdminLeaveTypesManager` to toggle year-end carry-forward (`allowCarryForward` / `maxCarryForwardDays`), and legacy `CASUAL`/`SICK`/`PRIVILEGED` records in the local DB need to be removed while keeping `CASUAL`/`SICK`/`PRIVILEGED` test scenarios archived cleanly.
+
+#### Target Files
+- `prisma/schema.prisma` — Expose existing CRM `users.dateOfJoining DateTime?` on HRM's read-only `User` model (zero migration required; run `prisma generate`)
+- `prisma/seed.ts` — Seed only `PAID` (`Paid Leave`, `12` annual cap metadata, `isPaid: true`, `allowCarryForward: false`); preserve custom leave types without seeding `CASUAL`/`SICK`/`PRIVILEGED`
+- `src/lib/dateUtils.ts` — Add `calculateMonthlyAccruedPaidLeaves(dateOfJoining, targetYear, asOfMonth)` helper anchored in IST
+- `src/repository/leaveBalance.repository.ts` — Fetch `user.dateOfJoining` alongside balances cleanly
+- `src/service/leaveBalance.service.ts` — Compute live monthly Paid Leave accrual (`asOfMonth` defaulted to current IST month for UI or `12` for past-year rollover), expose `hasJoiningDate`, preserve manual `adjustedDays` & `carriedForwardDays`, and support optional `asOfMonth` evaluation for leave-date projection
+- `src/service/leave.service.ts` — Validate & approve Paid Leave against accrued balance up to each year-segment's end month (`Nov 29 – Dec 1` counts December's `+1`), returning `hasJoiningDate` in `getMyLeaves`
+- `src/components/leaves/LeaveHistoryList.tsx` — Show missing-`dateOfJoining` contact-admin banner on `/leaves` when `hasJoiningDate === false`, and compact monthly accrual balance card
+- `src/components/leaves/AdminLeaveTypesManager.tsx` — Add `Edit` modal/action to toggle `allowCarryForward`, `maxCarryForwardDays`, `name`, `defaultAnnualDays`, and `isPaid` on existing leave types
+- `src/components/leaves/AdminLeaveBalancesManager.tsx` — Display live monthly accrued days (read-only) while keeping manual `adjustedDays` & `notes` editable
+- `src/tests/leaveTypesAndBalances.test.ts`, `src/tests/leave.test.ts`, `src/tests/leaveRoute.test.ts`, `src/tests/leaveUi.test.tsx` — RED $\rightarrow$ GREEN coverage for `<= 15th` vs `> 15th` waiting period, 1st-of-month `+1` accrual, cross-month (`Nov 29 – Dec 1`) allowance & deduction, `dateOfJoining = null` (`0` + banner), carry-forward edit modal, and `PAID`-only workflows
+- Cross-repo Markdown docs (`cb_hrm/CONTEXT/*`, `cb_crm/CONTEXT/*`, `SHARED_DATABASE_ARCHITECTURE_PATTERNS.md`) — Decision 11, Rule BR-LV-001, schema contracts, test scenarios (old archived + new added), operational guide
+
+---
+
+### Phase 9.5 Checklist
+
+#### Step 9.5.1: Read-Only `User.dateOfJoining` Mirror & Archive/Update Test Scenarios & Cross-Repo Docs
+- [x] Map `dateOfJoining DateTime?` in `prisma/schema.prisma` (`model User`) and run `npx prisma generate`.
+- [x] Update `cb_hrm/CONTEXT/decision_log.md` (Decision 11), `project_data.md` (Rule BR-LV-001), `database_schema.md`, `test_scenarios.md` (mark old `CASUAL`/`SICK`/`PRIVILEGED` scenarios as `[ARCHIVED]` and add `TS-LV-006`..`TS-LV-010` + `TS-BAL-002`), `CLIENT_OPERATIONAL_GUIDE.md`, `TECHNICAL_ARCHITECTURE.md`, `cb_crm/CONTEXT/database_schema.md`, `cb_crm/CONTEXT/decision_log.md` (Decision 32 cross-ref), and `SHARED_DATABASE_ARCHITECTURE_PATTERNS.md`.
+
+#### Step 9.5.2: RED State Test Creation for Monthly Accrual & Joining-Date Cutoff
+- [x] Add RED unit/integration tests in `src/tests/monthlyLeaveAccrual.test.ts` (plus updated `leave.test.ts`, `leaveRoute.test.ts`, `leaveTypesAndBalances.test.ts`, `leaveUi.test.tsx`) asserting:
+  - Joined `<= 15th` (e.g., `2026-11-15`) yields `0` in Nov/Dec/Jan and starts `+1`/month on Feb 1 (`2027-02`).
+  - Joined `> 15th` (e.g., `2026-11-16`) yields `0` in Nov/Dec/Jan/Feb and starts `+1`/month on Mar 1 (`2027-03`).
+  - Missing `dateOfJoining` (`null`) yields `0` accrued leaves and `hasJoiningDate: false`, rendering the contact-admin notice in `/leaves`.
+  - Cross-month request (`Nov 30 – Dec 2`) evaluates accrued balance up to December, permits all 3 days when December's `+1` covers it, deducts immediately upon pending/approval, restores on cancel, and blocks double-spending.
+  - `AdminLeaveTypesManager` Edit flow toggles `allowCarryForward` and updates `maxCarryForwardDays` via `PATCH /api/admin/leave-types/[id]`.
+- [x] Run `npm run test:run src/tests/monthlyLeaveAccrual.test.ts` $\rightarrow$ **CONFIRM RED** (6/6 failed).
+
+#### Step 9.5.3: Accrual Engine & Validation Implementation (`dateUtils.ts`, `leaveBalance.service.ts`, `leave.service.ts`) & GREEN State
+- [x] Implement `calculateMonthlyAccruedPaidLeaves` in `src/lib/dateUtils.ts`.
+- [x] Update `src/repository/leaveBalance.repository.ts`, `src/service/leaveBalance.service.ts`, and `src/service/leave.service.ts` to enforce monthly Paid Leave accrual, `dateOfJoining` cutoff, projected leave-month evaluation (`asOfMonth`), `adjustedDays` support, and carry-forward rollover.
+- [x] Update `src/app/(portal)/leaves/page.tsx` and `/api/leaves` consumers for `hasJoiningDate`.
+- [x] Run `npm run test:run src/tests/monthlyLeaveAccrual.test.ts` $\rightarrow$ **CONFIRM GREEN** (6/6 passed).
+
+#### Step 9.5.4: UI Updates (`LeaveHistoryList.tsx`, `AdminLeaveTypesManager.tsx`, `AdminLeaveBalancesManager.tsx`)
+- [x] Show missing-`dateOfJoining` notice banner in `LeaveHistoryList.tsx`.
+- [x] Add Edit modal/form to `AdminLeaveTypesManager.tsx` to toggle `allowCarryForward` & cap on existing leave types.
+- [x] Update `AdminLeaveBalancesManager.tsx` modal to show live monthly accrued entitlement alongside editable `adjustedDays` & `notes`.
+- [x] Verify `src/tests/leaveUi.test.tsx` $\rightarrow$ **CONFIRM GREEN** (10/10 passed).
+
+#### Step 9.5.5: Database Cleanup & Seed Update
+- [x] Update `prisma/seed.ts` to seed only `PAID` (`Paid Leave`) and ensure dev accounts (`admin@`, `broker@`) have a valid dev `dateOfJoining` when missing.
+- [x] Remove legacy `CASUAL`, `SICK`, `PRIVILEGED` leave types (and their dependent `hrm_leave_balances` / `hrm_leave_requests`) from the live local DB (`Deleted: { requests: 2, balances: 33, types: 3 }`) and execute `npm run db:seed`.
+
+#### Step 9.5.6: Full Quality Verification
+- [x] Run `npm run ci:quality` (`npm run db:verify-migrations && npm run typecheck && npm run lint && npm run test:run && npm run build`) ensuring 100% pass rate (29 test files / 133 tests passed, 0 lint errors/warnings).
+
+#### Phase 9.5 Verification Chain
+CRM sets an employee's `dateOfJoining` (e.g., `2026-06-16`) $\rightarrow$ Employee logs into HRM `/leaves` on `2026-11-28` $\rightarrow$ Waiting period (Jul, Aug, Sep) ended September; employee accrued `+1` on Oct 1 and `+1` on Nov 1 = `2` Paid Leaves $\rightarrow$ Employee applies for `Nov 29 – Dec 1` (3 weekdays) $\rightarrow$ System evaluates accrued entitlement through Dec (`3` days) $\rightarrow$ Request submits cleanly and reserves `3` days; Admin toggles Paid Leave carry-forward via Edit modal on `/admin/leaves`; employee without `dateOfJoining` sees `0` Paid Leaves and `"contact an administrator"` banner $\rightarrow$ `npm run ci:quality` passes 100% $\rightarrow$ ✅ Phase 9.5 Complete.
 
 ---
 

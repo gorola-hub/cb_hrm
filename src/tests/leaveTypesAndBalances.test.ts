@@ -13,7 +13,6 @@ import {
 import {
   submitLeaveRequest,
   approveLeaveRequest,
-  getMyLeaves,
 } from '@/service/leave.service';
 import { getMonthlyAttendance, punchIn } from '@/service/attendance.service';
 import { prisma } from '@/lib/prisma';
@@ -21,6 +20,7 @@ import { prisma } from '@/lib/prisma';
 describe('Phase 7.5: Dynamic Leave Types, Per-Employee Balances & Edge Cases', () => {
   let brokerId: string;
   let adminId: string;
+  let originalBrokerDoj: Date | null = null;
   const createdTypeCodes: string[] = [];
 
   async function cleanupTestData() {
@@ -41,10 +41,10 @@ describe('Phase 7.5: Dynamic Leave Types, Per-Employee Balances & Edge Cases', (
         where: { code: { in: createdTypeCodes } },
       });
     }
-    // Restore default SICK/CASUAL/PRIVILEGED active flags in case a test toggled them
+    // Restore default PAID active/rollover flags
     await prisma.leaveTypeConfig.updateMany({
-      where: { code: { in: ['CASUAL', 'SICK', 'PRIVILEGED'] } },
-      data: { isActive: true },
+      where: { code: 'PAID' },
+      data: { isActive: true, allowCarryForward: false, maxCarryForwardDays: 0 },
     });
   }
 
@@ -58,11 +58,22 @@ describe('Phase 7.5: Dynamic Leave Types, Per-Employee Balances & Edge Cases', (
     if (!broker || !admin) throw new Error('Seeded broker/admin not found');
     brokerId = broker.id;
     adminId = admin.id;
+    originalBrokerDoj = broker.dateOfJoining ?? null;
+    await prisma.user.update({
+      where: { id: brokerId },
+      data: { dateOfJoining: new Date('2025-01-01') },
+    });
     await cleanupTestData();
   });
 
   afterAll(async () => {
     await cleanupTestData();
+    if (brokerId) {
+      await prisma.user.update({
+        where: { id: brokerId },
+        data: { dateOfJoining: originalBrokerDoj },
+      });
+    }
     await prisma.$disconnect();
   });
 
@@ -152,43 +163,40 @@ describe('Phase 7.5: Dynamic Leave Types, Per-Employee Balances & Edge Cases', (
   });
 
   describe('Per-Employee Custom Balances, Fractional Adjustments & Carry-Forward', () => {
-    it('auto-provisions balances, supports custom quotas, fractional adjustments, and blocks negative total entitlement', async () => {
-      const casualType = await prisma.leaveTypeConfig.findUniqueOrThrow({
-        where: { code: 'CASUAL' },
+    it('accrues monthly balances from dateOfJoining, supports fractional adjustments, and blocks negative total entitlement', async () => {
+      const paidType = await prisma.leaveTypeConfig.findUniqueOrThrow({
+        where: { code: 'PAID' },
       });
 
-      // Auto-provisions 2026 balances from defaultAnnualDays
-      const initial = await getEmployeeLeaveBalances(brokerId, 2026);
-      const casualInitial = initial.find((b) => b.leaveType.code === 'CASUAL');
-      expect(casualInitial?.entitledDays).toBe(12);
-      expect(casualInitial?.remainingDays).toBe(12);
+      // Full-year 2026 eligible broker (DOJ 2025-01-01): 12 accrued through Dec 2026
+      const initial = await getEmployeeLeaveBalances(brokerId, 2026, { asOfMonth: 12 });
+      const paidInitial = initial.find((b) => b.leaveType.code === 'PAID');
+      expect(paidInitial?.entitledDays).toBe(12);
+      expect(paidInitial?.remainingDays).toBe(12);
 
-      // Admin sets prorated custom quota (6.5) + bonus adjustment (1.5) -> 8.0 total
+      // Admin grants +1.5 bonus adjustment -> 13.5 total through Dec 2026
       const adjusted = await adjustEmployeeLeaveBalance({
         userId: brokerId,
-        leaveTypeId: casualType.id,
+        leaveTypeId: paidType.id,
         year: 2026,
-        entitledDays: 6.5,
         adjustedDays: 1.5,
-        notes: 'Mid-year prorated quota + comp-off bonus',
+        notes: 'Comp-off bonus',
       });
       expect(adjusted.success).toBe(true);
       if (adjusted.success) {
-        expect(adjusted.balance.entitledDays).toBe(6.5);
         expect(adjusted.balance.adjustedDays).toBe(1.5);
       }
 
-      const after = await getEmployeeLeaveBalances(brokerId, 2026);
-      const casualAfter = after.find((b) => b.leaveType.code === 'CASUAL');
-      expect(casualAfter?.remainingDays).toBe(8);
+      const after = await getEmployeeLeaveBalances(brokerId, 2026, { asOfMonth: 12 });
+      const paidAfter = after.find((b) => b.leaveType.code === 'PAID');
+      expect(paidAfter?.remainingDays).toBe(13.5);
 
       // Reject negative total entitlement
       const invalidAdj = await adjustEmployeeLeaveBalance({
         userId: brokerId,
-        leaveTypeId: casualType.id,
+        leaveTypeId: paidType.id,
         year: 2026,
-        entitledDays: 2,
-        adjustedDays: -5,
+        adjustedDays: -20,
         notes: 'Invalid',
       });
       expect(invalidAdj.success).toBe(false);
@@ -198,25 +206,36 @@ describe('Phase 7.5: Dynamic Leave Types, Per-Employee Balances & Edge Cases', (
     });
 
     it('TS-BAL-001: Carry-forward rollover caps at maxCarryForwardDays, ignores non-carry-forward types & pending leaves, and is idempotent', async () => {
-      const privileged = await prisma.leaveTypeConfig.findUniqueOrThrow({
-        where: { code: 'PRIVILEGED' },
+      createdTypeCodes.push('NO_CARRY');
+      const paid = await prisma.leaveTypeConfig.findUniqueOrThrow({
+        where: { code: 'PAID' },
       });
-      const casual = await prisma.leaveTypeConfig.findUniqueOrThrow({
-        where: { code: 'CASUAL' },
+      await prisma.leaveTypeConfig.update({
+        where: { id: paid.id },
+        data: { allowCarryForward: true, maxCarryForwardDays: 10 },
       });
+      const noCarry = await createLeaveType({
+        code: 'NO_CARRY',
+        name: 'Non-Rollover Paid',
+        defaultAnnualDays: 12,
+        allowCarryForward: false,
+        maxCarryForwardDays: 0,
+        isPaid: true,
+      });
+      expect(noCarry.success).toBe(true);
+      if (!noCarry.success) return;
 
-      // Setup 2026 PRIVILEGED: entitled 15 + adjusted 2 = 17; approve 3 days -> 14 unused (cap is 10)
+      // 2026 PAID: 12 accrued + adjusted 2 = 14; approve 3 days -> 11 unused (cap is 10)
       await adjustEmployeeLeaveBalance({
         userId: brokerId,
-        leaveTypeId: privileged.id,
+        leaveTypeId: paid.id,
         year: 2026,
-        entitledDays: 15,
         adjustedDays: 2,
         notes: '2026 bonus',
       });
 
       const approvedReq = await submitLeaveRequest(brokerId, {
-        leaveTypeId: privileged.id,
+        leaveTypeId: paid.id,
         startDate: '2026-12-07',
         endDate: '2026-12-09',
         reason: '3-day vacation',
@@ -228,19 +247,10 @@ describe('Phase 7.5: Dynamic Leave Types, Per-Employee Balances & Edge Cases', (
 
       // Also create a PENDING request in 2026 (should NOT reduce carry-forward since not approved)
       await submitLeaveRequest(brokerId, {
-        leaveTypeId: privileged.id,
+        leaveTypeId: paid.id,
         startDate: '2026-12-14',
         endDate: '2026-12-15',
         reason: 'Pending 2 days',
-      });
-
-      // Setup 2026 CASUAL (allowCarryForward = false) with 12 unused
-      await adjustEmployeeLeaveBalance({
-        userId: brokerId,
-        leaveTypeId: casual.id,
-        year: 2026,
-        entitledDays: 12,
-        adjustedDays: 0,
       });
 
       // Run rollover 2026 -> 2027 twice to verify idempotency
@@ -249,33 +259,32 @@ describe('Phase 7.5: Dynamic Leave Types, Per-Employee Balances & Edge Cases', (
       const roll2 = await runCarryForwardRollover(2026, 2027, brokerId);
       expect(roll2.success).toBe(true);
 
-      const balances2027 = await getEmployeeLeaveBalances(brokerId, 2027);
-      const priv2027 = balances2027.find((b) => b.leaveType.code === 'PRIVILEGED');
-      const cas2027 = balances2027.find((b) => b.leaveType.code === 'CASUAL');
+      const balances2027 = await getEmployeeLeaveBalances(brokerId, 2027, { asOfMonth: 12 });
+      const paid2027 = balances2027.find((b) => b.leaveType.code === 'PAID');
+      const noCarry2027 = balances2027.find((b) => b.leaveType.code === 'NO_CARRY');
 
-      expect(priv2027?.carriedForwardDays).toBe(10); // Capped at maxCarryForwardDays = 10, not 20
-      expect(priv2027?.remainingDays).toBe(25); // 15 entitled + 10 carried
-      expect(cas2027?.carriedForwardDays).toBe(0); // allowCarryForward = false
+      expect(paid2027?.carriedForwardDays).toBe(10); // Capped at maxCarryForwardDays = 10
+      expect(paid2027?.remainingDays).toBe(22); // 12 monthly accrued (2027) + 10 carried
+      expect(noCarry2027?.carriedForwardDays).toBe(0); // allowCarryForward = false
     });
   });
 
   describe('Balance Enforcement, Unpaid Leave, Cross-Year & ANOMALY_STALE Edge Cases', () => {
     it('TS-LV-005: Blocks paid leave exceeding available balance (including pending reservation), allows unpaid LWP', async () => {
       createdTypeCodes.push('LWP');
-      const casual = await prisma.leaveTypeConfig.findUniqueOrThrow({ where: { code: 'CASUAL' } });
+      const paid = await prisma.leaveTypeConfig.findUniqueOrThrow({ where: { code: 'PAID' } });
 
-      // Restrict CASUAL balance to 2 days
+      // Restrict PAID Dec 2026 balance to 2 days (12 accrued - 10 adjusted = 2)
       await adjustEmployeeLeaveBalance({
         userId: brokerId,
-        leaveTypeId: casual.id,
+        leaveTypeId: paid.id,
         year: 2026,
-        entitledDays: 2,
-        adjustedDays: 0,
+        adjustedDays: -10,
       });
 
       // Requesting 3 days fails with LV_INSUFFICIENT_BALANCE
       const over = await submitLeaveRequest(brokerId, {
-        leaveTypeCode: 'CASUAL',
+        leaveTypeCode: 'PAID',
         startDate: '2026-12-07',
         endDate: '2026-12-09',
         reason: '3 days > 2 remaining',
@@ -287,7 +296,7 @@ describe('Phase 7.5: Dynamic Leave Types, Per-Employee Balances & Edge Cases', (
 
       // Requesting 2 days succeeds and reserves pendingDays = 2
       const first = await submitLeaveRequest(brokerId, {
-        leaveTypeCode: 'CASUAL',
+        leaveTypeCode: 'PAID',
         startDate: '2026-12-07',
         endDate: '2026-12-08',
         reason: '2 days within balance',
@@ -296,7 +305,7 @@ describe('Phase 7.5: Dynamic Leave Types, Per-Employee Balances & Edge Cases', (
 
       // Second concurrent PENDING request for 1 day fails because 2 pending already consumes available balance
       const second = await submitLeaveRequest(brokerId, {
-        leaveTypeCode: 'CASUAL',
+        leaveTypeCode: 'PAID',
         startDate: '2026-12-10',
         endDate: '2026-12-10',
         reason: 'Exceeds available after pending',
@@ -323,25 +332,17 @@ describe('Phase 7.5: Dynamic Leave Types, Per-Employee Balances & Edge Cases', (
     });
 
     it('handles cross-year leave requests (2026-12-30 to 2027-01-04) accurately per calendar year', async () => {
-      const casual = await prisma.leaveTypeConfig.findUniqueOrThrow({ where: { code: 'CASUAL' } });
-      // Give 2 days in 2026 and 1 day in 2027 -> cross-year needs 2 in 2026 and 2 in 2027 -> should reject!
+      const paid = await prisma.leaveTypeConfig.findUniqueOrThrow({ where: { code: 'PAID' } });
+      // Give 2 net days in Dec 2026 (12 accrued - 10) and only 1 day in Jan 2027 (1 accrued) -> needs 2 in Jan 2027 -> should reject!
       await adjustEmployeeLeaveBalance({
         userId: brokerId,
-        leaveTypeId: casual.id,
+        leaveTypeId: paid.id,
         year: 2026,
-        entitledDays: 2,
-        adjustedDays: 0,
-      });
-      await adjustEmployeeLeaveBalance({
-        userId: brokerId,
-        leaveTypeId: casual.id,
-        year: 2027,
-        entitledDays: 1,
-        adjustedDays: 0,
+        adjustedDays: -10,
       });
 
       const insufficientNextYear = await submitLeaveRequest(brokerId, {
-        leaveTypeCode: 'CASUAL',
+        leaveTypeCode: 'PAID',
         startDate: '2026-12-30',
         endDate: '2027-01-04',
         reason: 'New Year trip',
@@ -351,17 +352,16 @@ describe('Phase 7.5: Dynamic Leave Types, Per-Employee Balances & Edge Cases', (
         expect(insufficientNextYear.error.code).toBe('LV_INSUFFICIENT_BALANCE');
       }
 
-      // Increase 2027 to 2 days -> succeeds and deducts 2 from 2026 + 2 from 2027 after approval
+      // Add +1 adjustment in 2027 (1 accrued + 1 adjusted = 2) -> succeeds and deducts 2 from 2026 + 2 from 2027 after approval
       await adjustEmployeeLeaveBalance({
         userId: brokerId,
-        leaveTypeId: casual.id,
+        leaveTypeId: paid.id,
         year: 2027,
-        entitledDays: 2,
-        adjustedDays: 0,
+        adjustedDays: 1,
       });
 
       const okCrossYear = await submitLeaveRequest(brokerId, {
-        leaveTypeCode: 'CASUAL',
+        leaveTypeCode: 'PAID',
         startDate: '2026-12-30',
         endDate: '2027-01-04',
         reason: 'New Year trip',
@@ -372,11 +372,11 @@ describe('Phase 7.5: Dynamic Leave Types, Per-Employee Balances & Edge Cases', (
 
       await approveLeaveRequest(okCrossYear.leave.id, adminId);
 
-      const bal2026 = (await getMyLeaves(brokerId, 2026)).balances.find(
-        (b) => b.leaveType.code === 'CASUAL'
+      const bal2026 = (await getEmployeeLeaveBalances(brokerId, 2026, { asOfMonth: 12 })).find(
+        (b) => b.leaveType.code === 'PAID'
       );
-      const bal2027 = (await getMyLeaves(brokerId, 2027)).balances.find(
-        (b) => b.leaveType.code === 'CASUAL'
+      const bal2027 = (await getEmployeeLeaveBalances(brokerId, 2027, { asOfMonth: 1 })).find(
+        (b) => b.leaveType.code === 'PAID'
       );
       expect(bal2026?.usedDays).toBe(2);
       expect(bal2026?.remainingDays).toBe(0);
@@ -385,31 +385,23 @@ describe('Phase 7.5: Dynamic Leave Types, Per-Employee Balances & Edge Cases', (
     });
 
     it('prevents approving a pending paid leave if admin reduced balance below required days', async () => {
-      const sick = await prisma.leaveTypeConfig.findUniqueOrThrow({ where: { code: 'SICK' } });
-      await adjustEmployeeLeaveBalance({
-        userId: brokerId,
-        leaveTypeId: sick.id,
-        year: 2026,
-        entitledDays: 5,
-        adjustedDays: 0,
-      });
+      const paid = await prisma.leaveTypeConfig.findUniqueOrThrow({ where: { code: 'PAID' } });
 
       const req = await submitLeaveRequest(brokerId, {
-        leaveTypeCode: 'SICK',
+        leaveTypeCode: 'PAID',
         startDate: '2026-12-07',
         endDate: '2026-12-09',
-        reason: '3 days sick',
+        reason: '3 days paid leave',
       });
       expect(req.success).toBe(true);
       if (!req.success) return;
 
-      // Admin lowers quota to 1 day before reviewing
+      // Admin reduces quota by -11 days (12 accrued - 11 = 1 remaining) before reviewing
       await adjustEmployeeLeaveBalance({
         userId: brokerId,
-        leaveTypeId: sick.id,
+        leaveTypeId: paid.id,
         year: 2026,
-        entitledDays: 1,
-        adjustedDays: 0,
+        adjustedDays: -11,
       });
 
       const approve = await approveLeaveRequest(req.leave.id, adminId);

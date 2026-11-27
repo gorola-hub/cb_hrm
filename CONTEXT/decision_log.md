@@ -202,3 +202,29 @@ Early schema specifications modeled `LeaveType` (`CASUAL`, `SICK`, `PRIVILEGED`)
 - Eliminates database migrations for HR policy changes (leave types, quotas, carry-forward, shifts).
 - Prevents accidental cross-app DDL mutations on shared PostgreSQL tables in CI and local development.
 
+---
+
+### Decision 11: Monthly Paid Leave Accrual (+1/Month), 3-Month Joining Cutoff, Leave-Month Projection & Missing Joining Date Guard
+
+**Date:** 2026-11-28  
+**Status:** Accepted (Refines Decision 10 Leave Allocation Policy)
+
+#### Context
+Upfront annual entitlements provisioned at the start of the year (`CASUAL 12`, `SICK 12`, `PRIVILEGED 15`) did not match Capital Bridge operational policy. Employees only use **Paid Leave (`PAID`)**, earned incrementally at **`+1` day on the 1st of each eligible month** after completing a **3-month post-joining waiting period**, with eligibility governed by `users.dateOfJoining` managed in CRM (`<= 15th` vs `> 15th` cutoff rule). Employees also needed the ability to apply across month boundaries (e.g., `Nov 29 – Dec 1` using December's upcoming `+1` credit) while deducting approved/pending days immediately, and Administrators needed an inline **Edit** UI on leave type cards to toggle year-end carry-forward.
+
+#### Decision
+1. **Single Seeded Paid Leave (`PAID`):** Remove `CASUAL`, `SICK`, and `PRIVILEGED` from active seed and database; seed only `PAID` (`Paid Leave`, `isPaid: true`, `allowCarryForward: false` by default, configurable via Admin Edit UI).
+2. **Read-Only `users.dateOfJoining` Sparse Mirror:** Map CRM's existing nullable `users.dateOfJoining DateTime?` column (added by CRM migration `20260731200500_add_user_employee_fields`) onto HRM's read-only `User` model with **zero HRM migrations** (`prisma generate` only).
+3. **Monthly +1 Accrual & 3-Month + 15th-Cutoff Formula (IST):**
+   - **Joined on or before the 15th** (`day <= 15`): the joining month counts as Month 1 of the 3-month waiting period; Paid Leave accrues `+1`/month starting on the 1st of `joiningMonth + 3` (e.g., Nov 1–15 → waiting Nov, Dec, Jan → starts Feb 1).
+   - **Joined after the 15th** (`day > 15`): the joining month does not count as Month 1; Paid Leave accrues `+1`/month starting on the 1st of `joiningMonth + 4` (e.g., Nov 16–30 → waiting Dec, Jan, Feb → starts Mar 1).
+   - Within an eligible calendar year, accrued entitlement through month `M` equals the number of eligible months `[1..M]` in that year (`0..12`).
+4. **Leave-Month Balance Evaluation (`asOfMonth`):** Display earned balance on `/leaves` as of today's IST month, while leave submission and approval evaluate earned Paid Leave up to the requested leave's end-date month per calendar year segment so boundary spans (e.g., `Nov 29 – Dec 1`) succeed when the upcoming 1st-of-month credit covers them; approved and pending days reserve/deduct immediately and cancel restores them.
+5. **Missing `dateOfJoining = null` Safety Guard:** If CRM has not populated `users.dateOfJoining`, accrued Paid Leave safely defaults to `0` (`hasJoiningDate = false`) and `/leaves` displays a notice instructing the employee to contact an Administrator to add their joining date in CRM.
+6. **Admin Edit & Carry-Forward Toggle:** Expose an **Edit** modal on `AdminLeaveTypesManager` to toggle `allowCarryForward` / `maxCarryForwardDays` and keep manual per-employee `adjustedDays` (+/-) in `AdminLeaveBalancesManager`.
+
+#### Rationale
+- Eliminates unearned upfront annual leave consumption for recent hires and aligns leave tracking strictly with CRM's single source of truth for employee onboarding dates.
+- Avoids any schema duplication or destructive migration across the shared `cb_crm` PostgreSQL database.
+
+

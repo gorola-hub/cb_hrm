@@ -178,19 +178,18 @@ enum ShiftCode {
 }
 
 enum AttendanceStatus {
-  IN_PROGRESS // Active shift, punch-out pending
-  P           // Present (> 7.5 hrs net work)
-  HD          // Half Day (5.0 to 7.5 hrs net work)
-  A           // Absent (< 5.0 hrs net work or missed shift)
-  WO          // Week Off (Saturday / Sunday)
-  LV          // Approved Leave
+  IN_PROGRESS   // Active shift, punch-out pending
+  P             // Present (> 7.5 hrs net work)
+  HD            // Half Day (5.0 to 7.5 hrs net work)
+  A             // Absent (< 5.0 hrs net work or missed shift)
+  WO            // Week Off (Saturday / Sunday)
+  LV            // Approved Leave
+  ANOMALY_STALE // Forgotten punch-out (> 16 hours)
 }
 
-enum LeaveType {
-  CASUAL
-  SICK
-  PRIVILEGED
-}
+// Note: Dynamic leave types (`PAID` seeded by default; Admin-managed in `hrm_leave_types`)
+// and shift schedules (`Shift.code` string in `hrm_shifts`) are stored in master tables
+// rather than fixed Postgres enums (Decisions 10 & 11).
 
 enum LeaveStatus {
   PENDING

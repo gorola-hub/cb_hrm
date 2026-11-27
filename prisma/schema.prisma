@@ -18,6 +18,7 @@ model User {
   passwordHash  String
   empId         String?      @unique
   alias         String?
+  dateOfJoining DateTime?
   isActive      Boolean      @default(true)
   roleId        String
   role          Role         @relation(fields: [roleId], references: [id])

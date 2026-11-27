@@ -6,6 +6,7 @@ import { AdminLeaveTable } from '@/components/leaves/AdminLeaveTable';
 import { AdminLeaveTypesManager } from '@/components/leaves/AdminLeaveTypesManager';
 import { AdminLeaveBalancesManager } from '@/components/leaves/AdminLeaveBalancesManager';
 import { Navbar } from '@/components/layout/Navbar';
+import LeavesPage from '@/app/(portal)/leaves/page';
 
 vi.mock('next-auth/react', () => ({
   signOut: vi.fn(),
@@ -14,9 +15,9 @@ vi.mock('next-auth/react', () => ({
 describe('Phase 7.5 Leave Management & Dynamic Config UI Components', () => {
   const sampleLeaveTypes = [
     {
-      id: 'lt_casual',
-      code: 'CASUAL',
-      name: 'Casual Leave',
+      id: 'lt_paid',
+      code: 'PAID',
+      name: 'Paid Leave',
       defaultAnnualDays: 12,
       allowCarryForward: false,
       maxCarryForwardDays: 0,
@@ -220,12 +221,26 @@ describe('Phase 7.5 Leave Management & Dynamic Config UI Components', () => {
       expect(screen.getByText(/\+4/)).toBeInTheDocument();
       expect(screen.getByText(/\+2/)).toBeInTheDocument();
     });
+
+    it('renders contact-admin banner when hasJoiningDate is false (TS-LV-008)', () => {
+      render(
+        <LeaveHistoryList
+          requests={[]}
+          balances={[]}
+          hasJoiningDate={false}
+          loading={false}
+          onRefresh={vi.fn()}
+        />
+      );
+
+      expect(screen.getByText(/contact an administrator to add your joining date in crm/i)).toBeInTheDocument();
+    });
   });
 
   describe('AdminLeaveTable', () => {
     const sampleRequest = {
       id: 'lv_101',
-      leaveType: { id: 'lt_casual', code: 'CASUAL', name: 'Casual Leave' },
+      leaveType: { id: 'lt_paid', code: 'PAID', name: 'Paid Leave' },
       startDate: '2026-12-07',
       endDate: '2026-12-09',
       totalDays: 3,
@@ -320,7 +335,7 @@ describe('Phase 7.5 Leave Management & Dynamic Config UI Components', () => {
       render(<AdminLeaveTypesManager />);
 
       await waitFor(() => {
-        expect(screen.getByText('Casual Leave')).toBeInTheDocument();
+        expect(screen.getByText('Paid Leave')).toBeInTheDocument();
       });
 
       fireEvent.change(screen.getByLabelText(/type code/i), { target: { value: 'LWP' } });
@@ -334,6 +349,52 @@ describe('Phase 7.5 Leave Management & Dynamic Config UI Components', () => {
         expect(global.fetch).toHaveBeenCalledWith(
           '/api/admin/leave-types',
           expect.objectContaining({ method: 'POST' })
+        );
+      });
+    });
+
+    it('edits an existing leave type carry-forward setting via PATCH modal (TS-LV-009)', async () => {
+      global.fetch = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ success: true, leaveTypes: sampleLeaveTypes }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              success: true,
+              leaveType: { ...sampleLeaveTypes[0], allowCarryForward: true, maxCarryForwardDays: 5 },
+            }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ success: true, leaveTypes: sampleLeaveTypes }),
+        });
+
+      render(<AdminLeaveTypesManager />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Paid Leave')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: /edit paid/i }));
+      expect(screen.getByText(/edit leave type — paid/i)).toBeInTheDocument();
+
+      const rolloverCheckboxes = screen.getAllByLabelText(/allow year-end carry-forward/i);
+      fireEvent.click(rolloverCheckboxes[rolloverCheckboxes.length - 1]);
+      const capInputs = screen.getAllByLabelText(/carry-forward cap/i);
+      fireEvent.change(capInputs[capInputs.length - 1], { target: { value: '5' } });
+      fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
+
+      await waitFor(() => {
+        expect(global.fetch).toHaveBeenCalledWith(
+          '/api/admin/leave-types/lt_paid',
+          expect.objectContaining({
+            method: 'PATCH',
+            body: expect.stringContaining('"allowCarryForward":true'),
+          })
         );
       });
     });
@@ -403,6 +464,8 @@ describe('Phase 7.5 Leave Management & Dynamic Config UI Components', () => {
         expect(screen.getByText('Denver Broker')).toBeInTheDocument();
       });
 
+      expect(screen.getByText(/only leave types with/i)).toBeInTheDocument();
+
       fireEvent.click(screen.getByRole('button', { name: /run carry-forward rollover/i }));
 
       await waitFor(() => {
@@ -410,6 +473,102 @@ describe('Phase 7.5 Leave Management & Dynamic Config UI Components', () => {
           '/api/admin/leave-balances/carry-forward',
           expect.objectContaining({ method: 'POST' })
         );
+      });
+    });
+  });
+
+  describe('LeavesPage Live Status Sync', () => {
+    it('auto-refreshes leave status on window focus so admin approvals reflect without manual page reload', async () => {
+      const paidBalancePending = {
+        leaveType: sampleLeaveTypes[0],
+        year: 2026,
+        entitledDays: 11,
+        carriedForwardDays: 0,
+        adjustedDays: 0,
+        totalEntitlement: 11,
+        usedDays: 0,
+        pendingDays: 2,
+        remainingDays: 11,
+        availableDays: 9,
+        notes: null,
+      };
+      const pendingRequest = {
+        id: 'lv_sync_1',
+        leaveType: { id: 'lt_paid', code: 'PAID', name: 'Paid Leave', isPaid: true },
+        startDate: '2026-12-03',
+        endDate: '2026-12-04',
+        totalDays: 2,
+        reason: 'Test',
+        status: 'PENDING' as const,
+        adminNotes: null,
+        createdAt: '2026-11-27T20:00:00.000Z',
+        reviewedAt: null,
+        reviewer: null,
+      };
+
+      global.fetch = vi.fn((url: RequestInfo | URL) => {
+        const str = String(url);
+        if (str === '/api/leave-types') {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ success: true, leaveTypes: sampleLeaveTypes }),
+          } as Response);
+        }
+        // First call -> PENDING; subsequent focus refresh -> APPROVED
+        const callCount = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.filter(
+          (args) => String(args[0]) === '/api/leaves'
+        ).length;
+
+        if (callCount <= 1) {
+          return Promise.resolve({
+            ok: true,
+            json: () =>
+              Promise.resolve({
+                success: true,
+                data: {
+                  year: 2026,
+                  hasJoiningDate: true,
+                  requests: [pendingRequest],
+                  balances: [paidBalancePending],
+                },
+              }),
+          } as Response);
+        }
+
+        return Promise.resolve({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              success: true,
+              data: {
+                year: 2026,
+                hasJoiningDate: true,
+                requests: [{ ...pendingRequest, status: 'APPROVED' }],
+                balances: [
+                  {
+                    ...paidBalancePending,
+                    usedDays: 2,
+                    pendingDays: 0,
+                    remainingDays: 9,
+                    availableDays: 9,
+                  },
+                ],
+              },
+            }),
+        } as Response);
+      });
+
+      render(<LeavesPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText('Pending')).toBeInTheDocument();
+      });
+
+      // Simulate user returning to the browser tab after Admin approved in another window
+      fireEvent.focus(window);
+
+      await waitFor(() => {
+        expect(screen.getByText('Approved')).toBeInTheDocument();
       });
     });
   });

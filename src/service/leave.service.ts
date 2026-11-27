@@ -12,8 +12,9 @@ import {
 } from '@/repository/leave.repository';
 import { findLeaveTypeByCode, findLeaveTypeById } from '@/repository/leaveType.repository';
 import {
-  enumerateWeekdaysByYear,
+  enumerateWeekdayDetailsByYear,
   getEmployeeLeaveBalances,
+  getEmployeeLeaveBalancesWithMeta,
 } from '@/service/leaveBalance.service';
 import { getISTDateString } from '@/lib/dateUtils';
 
@@ -149,11 +150,11 @@ export async function submitLeaveRequest(
     };
   }
 
-  // Enforce balance per calendar year for paid leave types (unpaid types bypass balance cap)
+  // Enforce balance per calendar year (evaluated up to each year-segment's leave end month)
   if (leaveType.isPaid) {
-    const daysByYear = enumerateWeekdaysByYear(input.startDate, input.endDate);
-    for (const [year, daysNeeded] of daysByYear.entries()) {
-      const balances = await getEmployeeLeaveBalances(userId, year);
+    const detailsByYear = enumerateWeekdayDetailsByYear(input.startDate, input.endDate);
+    for (const [year, { count: daysNeeded, maxMonth }] of detailsByYear.entries()) {
+      const balances = await getEmployeeLeaveBalances(userId, year, { asOfMonth: maxMonth });
       const bucket = balances.find((b) => b.leaveType.id === leaveType.id);
       const available = bucket?.availableDays ?? 0;
       if (daysNeeded > available) {
@@ -188,15 +189,16 @@ export async function getMyLeaves(
   userId: string,
   year: number = parseInt(getISTDateString().slice(0, 4), 10)
 ) {
-  const [requests, balances] = await Promise.all([
+  const [requests, snapshot] = await Promise.all([
     findLeavesByUserId(userId),
-    getEmployeeLeaveBalances(userId, year),
+    getEmployeeLeaveBalancesWithMeta(userId, year),
   ]);
 
   return {
     year,
+    hasJoiningDate: snapshot.hasJoiningDate,
     requests,
-    balances,
+    balances: snapshot.balances,
   };
 }
 
@@ -278,9 +280,11 @@ export async function approveLeaveRequest(
   }
 
   if (existing.leaveType.isPaid) {
-    const daysByYear = enumerateWeekdaysByYear(existing.startDate, existing.endDate);
-    for (const [year, daysNeeded] of daysByYear.entries()) {
-      const balances = await getEmployeeLeaveBalances(existing.userId, year);
+    const detailsByYear = enumerateWeekdayDetailsByYear(existing.startDate, existing.endDate);
+    for (const [year, { count: daysNeeded, maxMonth }] of detailsByYear.entries()) {
+      const balances = await getEmployeeLeaveBalances(existing.userId, year, {
+        asOfMonth: maxMonth,
+      });
       const bucket = balances.find((b) => b.leaveType.id === existing.leaveTypeId);
       const remaining = bucket?.remainingDays ?? 0;
       if (daysNeeded > remaining) {

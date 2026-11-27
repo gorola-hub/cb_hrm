@@ -88,3 +88,61 @@ export function evaluateAttendanceStatus(netWorkMinutes: number): 'P' | 'HD' | '
   return 'A';
 }
 
+/**
+ * Calculates monthly accrued Paid Leaves (+1 on the 1st of each eligible month in IST)
+ * after a 3-month post-joining waiting period (Decision 11):
+ * - Joined on/before 15th (day <= 15): waiting period includes joining month -> starts joiningMonth + 3
+ * - Joined after 15th (day > 15): joining month excluded -> starts joiningMonth + 4
+ * - Missing joining date (null/undefined): returns 0
+ */
+export function calculateMonthlyAccruedPaidLeaves(
+  dateOfJoining: Date | null | undefined,
+  targetYear: number,
+  asOfMonth?: number
+): number {
+  if (!dateOfJoining || !Number.isInteger(targetYear)) {
+    return 0;
+  }
+
+  const joinDateStr = getISTDateString(dateOfJoining);
+  const [joinYearStr, joinMonthStr, joinDayStr] = joinDateStr.split('-');
+  const joinYear = parseInt(joinYearStr, 10);
+  const joinMonth = parseInt(joinMonthStr, 10);
+  const joinDay = parseInt(joinDayStr, 10);
+
+  if (!Number.isInteger(joinYear) || !Number.isInteger(joinMonth) || !Number.isInteger(joinDay)) {
+    return 0;
+  }
+
+  const joinMonthIndex = joinYear * 12 + (joinMonth - 1);
+  const probationMonthsOffset = joinDay <= 15 ? 3 : 4;
+  const eligibleStartMonthIndex = joinMonthIndex + probationMonthsOffset;
+
+  let defaultLimitMonth: number;
+  if (asOfMonth !== undefined) {
+    defaultLimitMonth = asOfMonth;
+  } else {
+    const todayIST = getISTDateString();
+    const curYear = parseInt(todayIST.slice(0, 4), 10);
+    const curMonth = parseInt(todayIST.slice(5, 7), 10);
+    if (targetYear < curYear) {
+      defaultLimitMonth = 12;
+    } else if (targetYear === curYear) {
+      defaultLimitMonth = curMonth;
+    } else {
+      defaultLimitMonth = 0;
+    }
+  }
+
+  const limitMonth = Math.max(0, Math.min(12, Math.trunc(defaultLimitMonth)));
+  let accrued = 0;
+  for (let m = 1; m <= limitMonth; m++) {
+    const monthIndex = targetYear * 12 + (m - 1);
+    if (monthIndex >= eligibleStartMonthIndex) {
+      accrued++;
+    }
+  }
+
+  return accrued;
+}
+

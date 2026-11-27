@@ -89,6 +89,16 @@ export async function upsertCarriedForward(data: {
   });
 }
 
+export async function findUserJoiningDate(userId: string) {
+  return prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      dateOfJoining: true,
+    },
+  });
+}
+
 export async function findActiveUsersForBalances(userId?: string) {
   return prisma.user.findMany({
     where: {
@@ -101,6 +111,7 @@ export async function findActiveUsersForBalances(userId?: string) {
       email: true,
       empId: true,
       alias: true,
+      dateOfJoining: true,
       role: {
         select: {
           code: true,

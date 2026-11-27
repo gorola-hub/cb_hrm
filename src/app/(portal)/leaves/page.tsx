@@ -14,20 +14,24 @@ export default function LeavesPage() {
   const [loading, setLoading] = useState(true);
   const [requests, setRequests] = useState<LeaveRequestItem[]>([]);
   const [balances, setBalances] = useState<LeaveBalance[]>([]);
+  const [hasJoiningDate, setHasJoiningDate] = useState<boolean>(true);
   const [leaveTypes, setLeaveTypes] = useState<LeaveTypeItem[]>([]);
 
-  const loadLeaves = useCallback(async () => {
+  const loadLeaves = useCallback(async (showSpinner = true) => {
     try {
-      setLoading(true);
+      if (showSpinner) {
+        setLoading(true);
+      }
       const [leavesRes, typesRes] = await Promise.all([
-        fetch('/api/leaves'),
-        fetch('/api/leave-types'),
+        fetch('/api/leaves', { cache: 'no-store' }),
+        fetch('/api/leave-types', { cache: 'no-store' }),
       ]);
       const leavesJson = await leavesRes.json();
       const typesJson = await typesRes.json();
       if (leavesRes.ok && leavesJson.success && leavesJson.data) {
         setRequests(leavesJson.data.requests);
         setBalances(leavesJson.data.balances);
+        setHasJoiningDate(leavesJson.data.hasJoiningDate ?? true);
       }
       if (typesRes.ok && typesJson.success && Array.isArray(typesJson.leaveTypes)) {
         setLeaveTypes(typesJson.leaveTypes);
@@ -35,12 +39,30 @@ export default function LeavesPage() {
     } catch {
       // Handled gracefully
     } finally {
-      setLoading(false);
+      if (showSpinner) {
+        setLoading(false);
+      }
     }
   }, []);
 
   useEffect(() => {
-    loadLeaves();
+    loadLeaves(true);
+
+    const silentRefresh = () => {
+      if (document.visibilityState === 'visible') {
+        loadLeaves(false);
+      }
+    };
+
+    window.addEventListener('focus', silentRefresh);
+    document.addEventListener('visibilitychange', silentRefresh);
+    const interval = setInterval(silentRefresh, 10000);
+
+    return () => {
+      window.removeEventListener('focus', silentRefresh);
+      document.removeEventListener('visibilitychange', silentRefresh);
+      clearInterval(interval);
+    };
   }, [loadLeaves]);
 
   return (
@@ -71,14 +93,15 @@ export default function LeavesPage() {
       <LeaveHistoryList
         requests={requests}
         balances={balances}
+        hasJoiningDate={hasJoiningDate}
         loading={loading}
-        onRefresh={loadLeaves}
+        onRefresh={() => loadLeaves(false)}
       />
 
       <LeaveRequestModal
         isOpen={modalOpen}
         onClose={() => setModalOpen(false)}
-        onSubmitted={loadLeaves}
+        onSubmitted={() => loadLeaves(false)}
         leaveTypes={leaveTypes.length > 0 ? leaveTypes : undefined}
       />
     </div>

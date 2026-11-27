@@ -70,7 +70,7 @@ export function Navbar({ user, initialPendingLeaveCount }: NavbarProps) {
 
     const refreshPendingCount = async () => {
       try {
-        const res = await fetch('/api/admin/leaves?status=PENDING');
+        const res = await fetch('/api/admin/leaves?status=PENDING', { cache: 'no-store' });
         const json = await res.json();
         if (res.ok && json.success && json.data) {
           setPendingLeaveCount(json.data.pendingCount ?? 0);
@@ -84,9 +84,22 @@ export function Navbar({ user, initialPendingLeaveCount }: NavbarProps) {
       refreshPendingCount();
     }
 
+    const silentRefresh = () => {
+      if (document.visibilityState === 'visible') {
+        refreshPendingCount();
+      }
+    };
+
     window.addEventListener('hrm:leaves-updated', refreshPendingCount);
+    window.addEventListener('focus', silentRefresh);
+    document.addEventListener('visibilitychange', silentRefresh);
+    const interval = setInterval(silentRefresh, 15000);
+
     return () => {
       window.removeEventListener('hrm:leaves-updated', refreshPendingCount);
+      window.removeEventListener('focus', silentRefresh);
+      document.removeEventListener('visibilitychange', silentRefresh);
+      clearInterval(interval);
     };
   }, [isAdmin, initialPendingLeaveCount]);
 

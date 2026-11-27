@@ -29,6 +29,7 @@ describe('Leave Management & Dynamic Types/Balances API Routes Integration', () 
   let brokerEmail: string;
   let adminId: string;
   let adminEmail: string;
+  let originalBrokerDoj: Date | null = null;
   const createdTypeCodes: string[] = [];
 
   function createRequest(url: string, method: string = 'GET', body?: unknown): Request {
@@ -58,8 +59,8 @@ describe('Leave Management & Dynamic Types/Balances API Routes Integration', () 
       });
     }
     await prisma.leaveTypeConfig.updateMany({
-      where: { code: { in: ['CASUAL', 'SICK', 'PRIVILEGED'] } },
-      data: { isActive: true },
+      where: { code: 'PAID' },
+      data: { isActive: true, allowCarryForward: false, maxCarryForwardDays: 0 },
     });
   }
 
@@ -76,6 +77,12 @@ describe('Leave Management & Dynamic Types/Balances API Routes Integration', () 
     brokerEmail = broker.email;
     adminId = admin.id;
     adminEmail = admin.email;
+    originalBrokerDoj = broker.dateOfJoining ?? null;
+
+    await prisma.user.update({
+      where: { id: brokerId },
+      data: { dateOfJoining: new Date('2025-01-01') },
+    });
 
     mockUser = {
       id: brokerId,
@@ -88,6 +95,12 @@ describe('Leave Management & Dynamic Types/Balances API Routes Integration', () 
 
   afterAll(async () => {
     await cleanup();
+    if (brokerId) {
+      await prisma.user.update({
+        where: { id: brokerId },
+        data: { dateOfJoining: originalBrokerDoj },
+      });
+    }
     await prisma.$disconnect();
   });
 
@@ -99,7 +112,7 @@ describe('Leave Management & Dynamic Types/Balances API Routes Integration', () 
       (
         await submitLeaveHandler(
           createRequest('http://localhost:3001/api/leaves', 'POST', {
-            leaveTypeCode: 'CASUAL',
+            leaveTypeCode: 'PAID',
             startDate: '2026-12-07',
             endDate: '2026-12-07',
             reason: 'Test',
@@ -179,11 +192,11 @@ describe('Leave Management & Dynamic Types/Balances API Routes Integration', () 
     const typesRes = await getLeaveTypesHandler();
     expect(typesRes.status).toBe(200);
     const typesJson = await typesRes.json();
-    expect(typesJson.leaveTypes.length).toBeGreaterThanOrEqual(3);
+    expect(typesJson.leaveTypes.some((t: { code: string }) => t.code === 'PAID')).toBe(true);
 
     const badRes = await submitLeaveHandler(
       createRequest('http://localhost:3001/api/leaves', 'POST', {
-        leaveTypeCode: 'CASUAL',
+        leaveTypeCode: 'PAID',
         startDate: '2026-12-10',
         endDate: '2026-12-08',
         reason: 'Invalid',
@@ -194,7 +207,7 @@ describe('Leave Management & Dynamic Types/Balances API Routes Integration', () 
 
     const okRes = await submitLeaveHandler(
       createRequest('http://localhost:3001/api/leaves', 'POST', {
-        leaveTypeCode: 'CASUAL',
+        leaveTypeCode: 'PAID',
         startDate: '2026-12-07',
         endDate: '2026-12-08',
         reason: 'Personal errand',
@@ -205,11 +218,11 @@ describe('Leave Management & Dynamic Types/Balances API Routes Integration', () 
     expect(okJson.success).toBe(true);
     expect(okJson.leave.status).toBe('PENDING');
     expect(okJson.leave.totalDays).toBe(2);
-    expect(okJson.leave.leaveType.code).toBe('CASUAL');
+    expect(okJson.leave.leaveType.code).toBe('PAID');
 
     const overlapRes = await submitLeaveHandler(
       createRequest('http://localhost:3001/api/leaves', 'POST', {
-        leaveTypeCode: 'SICK',
+        leaveTypeCode: 'PAID',
         startDate: '2026-12-08',
         endDate: '2026-12-09',
         reason: 'Doctor visit',
@@ -222,7 +235,7 @@ describe('Leave Management & Dynamic Types/Balances API Routes Integration', () 
   it('GET /api/leaves and POST /api/leaves/[id]/cancel work with balance tracking', async () => {
     const createRes = await submitLeaveHandler(
       createRequest('http://localhost:3001/api/leaves', 'POST', {
-        leaveTypeCode: 'SICK',
+        leaveTypeCode: 'PAID',
         startDate: '2026-12-14',
         endDate: '2026-12-14',
         reason: 'Dental',
@@ -236,11 +249,12 @@ describe('Leave Management & Dynamic Types/Balances API Routes Integration', () 
     expect(listRes.status).toBe(200);
     const listJson = await listRes.json();
     expect(listJson.success).toBe(true);
+    expect(listJson.data.hasJoiningDate).toBe(true);
     expect(listJson.data.requests).toHaveLength(1);
-    const sickBal = listJson.data.balances.find(
-      (b: { leaveType: { code: string } }) => b.leaveType.code === 'SICK'
+    const paidBal = listJson.data.balances.find(
+      (b: { leaveType: { code: string } }) => b.leaveType.code === 'PAID'
     );
-    expect(sickBal.pendingDays).toBe(1);
+    expect(paidBal.pendingDays).toBe(1);
 
     const cancelRes = await cancelLeaveHandler(
       createRequest(`http://localhost:3001/api/leaves/${leave.id}/cancel`, 'POST'),
@@ -338,7 +352,7 @@ describe('Leave Management & Dynamic Types/Balances API Routes Integration', () 
   it('TS-LV-003: ADMIN approves leave and auto-marks LV attendance via route', async () => {
     const createRes = await submitLeaveHandler(
       createRequest('http://localhost:3001/api/leaves', 'POST', {
-        leaveTypeCode: 'CASUAL',
+        leaveTypeCode: 'PAID',
         startDate: '2026-12-07',
         endDate: '2026-12-07',
         reason: 'Family function',
@@ -366,7 +380,7 @@ describe('Leave Management & Dynamic Types/Balances API Routes Integration', () 
   it('ADMIN reject route requires adminNotes and sets REJECTED', async () => {
     const createRes = await submitLeaveHandler(
       createRequest('http://localhost:3001/api/leaves', 'POST', {
-        leaveTypeCode: 'CASUAL',
+        leaveTypeCode: 'PAID',
         startDate: '2026-12-11',
         endDate: '2026-12-11',
         reason: 'Personal day',

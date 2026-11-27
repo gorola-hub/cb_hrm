@@ -165,7 +165,10 @@ All API endpoints and form validations must return standardized JSON error envel
 
 ### 2.6 Leave Management (`TS-LV`)
 
-#### `TS-LV-001`: Submit Leave Application
+> **Note:** Legacy multi-type annual upfront quota scenarios (`CASUAL` / `SICK` / `PRIVILEGED`) are preserved below and marked **`[ARCHIVED]`** for historical reference; active behavior is governed by **Phase 9.5** scenarios (`TS-LV-006` through `TS-LV-010` and `TS-BAL-002`).
+
+#### `TS-LV-001` *[ARCHIVED — Legacy Casual/Sick/Privileged]*: Submit Leave Application
+- **Status:** `[ARCHIVED — Superseded by TS-LV-006 / Phase 9.5 (CASUAL replaced by single Paid Leave PAID)]`
 - **Given:** Employee has no existing leave requests for `"2026-12-05"` to `"2026-12-07"`.
 - **When:** Employee submits a `CASUAL` leave request for those dates with reason `"Family wedding"`.
 - **Then:** `hrm_leave_requests` row created with `status = PENDING`.
@@ -182,20 +185,59 @@ All API endpoints and form validations must return standardized JSON error envel
   - Leave status changes to `APPROVED`.
   - Attendance record for `"2026-12-05"` is automatically created/updated with `status = LV`.
 
-#### `TS-LV-004`: Dynamic Leave Types & Soft Deactivation
+#### `TS-LV-004` *[ARCHIVED — Legacy Annual Quota & Sick Reference]*: Dynamic Leave Types & Soft Deactivation
+- **Status:** `[ARCHIVED — Superseded by TS-LV-009 / Phase 9.5; SICK is no longer seeded]`
 - **Given:** Admin creates `BEREAVEMENT` (`5` days/yr, paid) and deactivates `SICK`.
 - **When:** Employee applies for `BEREAVEMENT` vs deactivated `SICK`.
 - **Then:** `BEREAVEMENT` succeeds (`201`); `SICK` fails (`400 LV_TYPE_INACTIVE`) while historical `SICK` records remain intact.
 
-#### `TS-LV-005`: Insufficient Balance Block & Unpaid Leave Bypass
+#### `TS-LV-005` *[ARCHIVED — Legacy Casual Quota Reference]*: Insufficient Balance Block & Unpaid Leave Bypass
+- **Status:** `[ARCHIVED — Superseded by TS-LV-008 / Phase 9.5; CASUAL replaced by monthly Paid Leave PAID]`
 - **Given:** Employee has `2` remaining `CASUAL` days and `0` balance on unpaid `LWP` (`isPaid = false`).
 - **When:** Employee requests `3` `CASUAL` days vs `3` `LWP` days.
 - **Then:** `CASUAL` fails (`400 LV_INSUFFICIENT_BALANCE`); `LWP` succeeds (`201`).
 
-#### `TS-BAL-001`: Per-Employee Custom Quota, Adjustments & Carry-Forward Rollover
+#### `TS-BAL-001` *[ARCHIVED — Legacy Casual/Privileged Annual Quota Rollover]*: Per-Employee Custom Quota, Adjustments & Carry-Forward Rollover
+- **Status:** `[ARCHIVED — Superseded by TS-BAL-002 / Phase 9.5]`
 - **Given:** Employee has `entitledDays = 15`, `used = 3`, `adjustedDays = 2` in `2026` on `PRIVILEGED` (`allowCarryForward = true`, `maxCarryForwardDays = 10`).
 - **When:** Admin runs carry-forward rollover from `2026` to `2027` twice (idempotency check).
 - **Then:** `2027` balance receives `carriedForwardDays = 10` (capped from `14` unused days) without double-counting on re-run.
+
+#### `TS-LV-006` *(Active — Phase 9.5)*: 3-Month Probation Cutoff (`<= 15th` vs `> 15th` Joining Date) & `+1`/Month Credit
+- **Given:**
+  - Employee A has `dateOfJoining = "2026-11-15"` (`<= 15th`).
+  - Employee B has `dateOfJoining = "2026-11-16"` (`> 15th`).
+- **Then:**
+  - For **Employee A**: 3-month probation covers Nov, Dec, Jan (`0` accrued in `2026` and `Jan 2027`); accrual begins **`2027-02-01`** (`Feb = 1`, `Mar = 2`, ..., `Dec = 11`).
+  - For **Employee B**: Nov does not count; 3-month probation covers Dec, Jan, Feb (`0` accrued through `Feb 2027`); accrual begins **`2027-03-01`** (`Mar = 1`, `Apr = 2`, ..., `Dec = 10`).
+
+#### `TS-LV-007` *(Active — Phase 9.5)*: Cross-Month Leave Projection (`Nov 29 – Dec 1`), Immediate Deduction & Cancel Restoration
+- **Given:** Today is `"2026-11-28"`, employee started accruing in Oct 2026 (`2` Paid Leaves accrued through Nov 2026, `3` cumulative by Dec 1).
+- **When:** Employee applies for `PAID` leave spanning `2026-11-30` to `2026-12-02` (3 weekdays, `endDate` in Dec) vs `2026-11-25` to `2026-11-27` (3 weekdays strictly within Nov).
+- **Then:**
+  - The Nov-only 3-day request fails (`400 LV_INSUFFICIENT_BALANCE`).
+  - The Nov–Dec 3-day request succeeds (`PENDING`), reserves `pendingDays = 3` immediately, and rejects a second request until cancelled or newly accrued.
+  - Cancelling restores availability; Admin approving marks weekday attendance as `LV` and records `usedDays = 3`.
+
+#### `TS-LV-008` *(Active — Phase 9.5)*: Missing `dateOfJoining` Safety Guard & UI Notice
+- **Given:** Employee has `dateOfJoining = null` in CRM `users`.
+- **When:** Employee loads `/leaves` (`GET /api/leaves`) and attempts to submit Paid Leave.
+- **Then:** Accrued `PAID` balance is `0`, `hasJoiningDate = false`, `/leaves` renders the contact-Admin notice, and Paid Leave submission fails with `LV_INSUFFICIENT_BALANCE`.
+
+#### `TS-LV-009` *(Active — Phase 9.5)*: Admin Leave Type Edit Modal (Carry-Forward Toggle) & `/leaves` Inactive Filter
+- **Given:** `PAID` leave exists with `allowCarryForward = false`.
+- **When:** Admin clicks **Edit** in `AdminLeaveTypesManager` to enable `allowCarryForward = true` with `maxCarryForwardDays = 5` (`PATCH /api/admin/leave-types/[id]`), or disables a custom leave type (`isActive = false`).
+- **Then:** Updated carry-forward rules persist immediately; inactive leave types are hidden from balance cards on `/leaves` and blocked for new submissions (`400 LV_TYPE_INACTIVE`).
+
+#### `TS-LV-010` *(Active — Phase 9.5)*: Seeded `PAID`-Only Workflow & Unpaid Custom Leave Bypass
+- **Given:** Database is seeded with `PAID` (`Paid Leave`) only; Admin optionally creates an unpaid `LWP` (`isPaid = false`) type.
+- **When:** Employee applies for `PAID` (with accrued balance) and `LWP` (`0` accrued).
+- **Then:** Both succeed; `PAID` enforces monthly accrued balance while `LWP` bypasses the balance ceiling.
+
+#### `TS-BAL-002` *(Active — Phase 9.5)*: Monthly Accrued Carry-Forward Rollover & Manual Admin Adjustments
+- **Given:** Employee earned `10` Paid Leaves in `2026` (started Mar 2026), Admin granted `adjustedDays = 2`, employee used `3` approved days (`9` unused), and `PAID` has `allowCarryForward = true`, `maxCarryForwardDays = 6`.
+- **When:** Admin runs carry-forward rollover from `2026` to `2027` twice (idempotency check).
+- **Then:** `2027` receives `carriedForwardDays = 6` (capped at `6`, ignoring pending requests and without double-counting on re-run), layered cleanly on top of `2027`'s monthly `+1` Paid Leave accrual.
 
 ---
 

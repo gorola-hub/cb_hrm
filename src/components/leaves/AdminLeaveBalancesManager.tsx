@@ -29,7 +29,6 @@ export function AdminLeaveBalancesManager() {
     userName: string;
     balance: LeaveBalance;
   } | null>(null);
-  const [entitledDays, setEntitledDays] = useState('0');
   const [adjustedDays, setAdjustedDays] = useState('0');
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
@@ -95,7 +94,6 @@ export function AdminLeaveBalancesManager() {
           userId: editTarget.userId,
           leaveTypeId: editTarget.balance.leaveType.id,
           year,
-          entitledDays: Number(entitledDays),
           adjustedDays: Number(adjustedDays),
           notes: notes.trim() || null,
         }),
@@ -116,40 +114,49 @@ export function AdminLeaveBalancesManager() {
 
   return (
     <div className="bg-card border border-border rounded-2xl p-6 shadow-xl card-noise space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
-        <div className="flex items-center gap-3">
-          <label htmlFor="balance-year" className="text-xs font-semibold text-muted-foreground font-serif">
-            Year
-          </label>
-          <select
-            id="balance-year"
-            value={year}
-            onChange={(e) => setYear(Number(e.target.value))}
-            className="rounded-xl bg-secondary border border-border px-3 py-1.5 text-xs font-mono text-foreground"
+      <div className="border-b border-border pb-4 space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <label htmlFor="balance-year" className="text-xs font-semibold text-muted-foreground font-serif">
+              Year
+            </label>
+            <select
+              id="balance-year"
+              value={year}
+              onChange={(e) => setYear(Number(e.target.value))}
+              className="rounded-xl bg-secondary border border-border px-3 py-1.5 text-xs font-mono text-foreground"
+            >
+              {[currentYear - 1, currentYear, currentYear + 1].map((y) => (
+                <option key={y} value={y}>
+                  {y}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleRollover}
+            disabled={rollingOver}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-zinc-900 text-[#ffd700] border border-amber-400/60 hover:bg-zinc-800 cursor-pointer disabled:opacity-50 font-serif"
           >
-            {[currentYear - 1, currentYear, currentYear + 1].map((y) => (
-              <option key={y} value={y}>
-                {y}
-              </option>
-            ))}
-          </select>
+            {rollingOver ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <RefreshCw className="w-3.5 h-3.5" />
+            )}
+            <span>
+              Run Carry-Forward Rollover ({year} → {year + 1})
+            </span>
+          </button>
         </div>
 
-        <button
-          type="button"
-          onClick={handleRollover}
-          disabled={rollingOver}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold bg-zinc-900 text-[#ffd700] border border-amber-400/60 hover:bg-zinc-800 cursor-pointer disabled:opacity-50 font-serif"
-        >
-          {rollingOver ? (
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-          ) : (
-            <RefreshCw className="w-3.5 h-3.5" />
-          )}
-          <span>
-            Run Carry-Forward Rollover ({year} → {year + 1})
-          </span>
-        </button>
+        <p className="text-[11px] text-muted-foreground font-serif sm:text-right">
+          Select the source <span className="text-foreground font-medium">Year</span> whose unused
+          leaves you want to roll into {year + 1}. Only leave types with{' '}
+          <span className="text-foreground font-medium">Allow Year-End Carry-Forward</span> enabled
+          will carry forward (safe to re-run anytime—recalculates without double-counting).
+        </p>
       </div>
 
       {error && (
@@ -211,7 +218,6 @@ export function AdminLeaveBalancesManager() {
                       type="button"
                       onClick={() => {
                         setEditTarget({ userId: emp.user.id, userName: emp.user.name, balance: b });
-                        setEntitledDays(String(b.entitledDays));
                         setAdjustedDays(String(b.adjustedDays));
                         setNotes(b.notes ?? '');
                       }}
@@ -236,22 +242,11 @@ export function AdminLeaveBalancesManager() {
               Adjust {editTarget.balance.leaveType.name} — {editTarget.userName} ({year})
             </h3>
             <form onSubmit={handleAdjustSubmit} className="space-y-3">
-              <div>
-                <label
-                  htmlFor="adj-entitled"
-                  className="block text-xs font-semibold uppercase text-muted-foreground mb-1 font-serif"
-                >
-                  Base Annual Quota (Entitled Days)
-                </label>
-                <input
-                  id="adj-entitled"
-                  type="number"
-                  step="0.5"
-                  min="0"
-                  value={entitledDays}
-                  onChange={(e) => setEntitledDays(e.target.value)}
-                  className="w-full rounded-xl bg-secondary border border-border px-3 py-2 text-sm font-mono text-foreground"
-                />
+              <div className="rounded-xl bg-secondary border border-border px-3 py-2 text-xs text-muted-foreground flex items-center justify-between">
+                <span className="font-serif">Monthly Accrued YTD</span>
+                <strong className="font-mono text-foreground">
+                  {editTarget.balance.entitledDays} days
+                </strong>
               </div>
 
               <div>

@@ -1,10 +1,11 @@
 import { LeaveTypeConfig, LeaveBalance } from '@prisma/client';
-import { getISTDateString } from '@/lib/dateUtils';
+import { calculateMonthlyAccruedPaidLeaves, getISTDateString } from '@/lib/dateUtils';
 import { findAllLeaveTypes, findLeaveTypeById } from '@/repository/leaveType.repository';
 import {
   findActiveUsersForBalances,
   findBalance,
   findBalancesForUserYear,
+  findUserJoiningDate,
   upsertCarriedForward,
   upsertLeaveBalance,
 } from '@/repository/leaveBalance.repository';
@@ -24,6 +25,16 @@ export interface EmployeeLeaveBalanceView {
   notes: string | null;
 }
 
+export interface EmployeeLeaveBalanceSnapshot {
+  hasJoiningDate: boolean;
+  balances: EmployeeLeaveBalanceView[];
+}
+
+export interface YearWeekdaySummary {
+  count: number;
+  maxMonth: number;
+}
+
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 function isValidDateStr(dateStr: string): boolean {
@@ -33,12 +44,15 @@ function isValidDateStr(dateStr: string): boolean {
 }
 
 /**
- * Counts weekdays (Mon-Fri) per calendar year across an inclusive [startDate, endDate] range.
+ * Enumerates weekday counts and highest covered month (1-12) per calendar year across [startDate, endDate].
  */
-export function enumerateWeekdaysByYear(startDate: string, endDate: string): Map<number, number> {
-  const counts = new Map<number, number>();
+export function enumerateWeekdayDetailsByYear(
+  startDate: string,
+  endDate: string
+): Map<number, YearWeekdaySummary> {
+  const details = new Map<number, YearWeekdaySummary>();
   if (!isValidDateStr(startDate) || !isValidDateStr(endDate) || endDate < startDate) {
-    return counts;
+    return details;
   }
 
   const cursor = new Date(`${startDate}T12:00:00.000Z`);
@@ -47,27 +61,51 @@ export function enumerateWeekdaysByYear(startDate: string, endDate: string): Map
     const day = cursor.getUTCDay();
     if (day !== 0 && day !== 6) {
       const yr = cursor.getUTCFullYear();
-      counts.set(yr, (counts.get(yr) ?? 0) + 1);
+      const month = cursor.getUTCMonth() + 1;
+      const prev = details.get(yr);
+      if (prev) {
+        prev.count += 1;
+        prev.maxMonth = Math.max(prev.maxMonth, month);
+      } else {
+        details.set(yr, { count: 1, maxMonth: month });
+      }
     }
     cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return details;
+}
+
+/**
+ * Counts weekdays (Mon-Fri) per calendar year across an inclusive [startDate, endDate] range.
+ */
+export function enumerateWeekdaysByYear(startDate: string, endDate: string): Map<number, number> {
+  const counts = new Map<number, number>();
+  for (const [year, info] of enumerateWeekdayDetailsByYear(startDate, endDate).entries()) {
+    counts.set(year, info.count);
   }
   return counts;
 }
 
 /**
- * Returns per-leave-type balances for an employee in the given IST calendar year.
- * Auto-provisions missing balance rows for active leave types using defaultAnnualDays.
+ * Returns per-leave-type balances plus joining-date status for an employee in the given IST calendar year.
+ * Paid leave entitlement is calculated dynamically from users.dateOfJoining (+1/month after 3-month cutoff).
  */
-export async function getEmployeeLeaveBalances(
+export async function getEmployeeLeaveBalancesWithMeta(
   userId: string,
-  year: number = parseInt(getISTDateString().slice(0, 4), 10)
-): Promise<EmployeeLeaveBalanceView[]> {
-  const [allTypes, existingBalances, activeRequests] = await Promise.all([
+  year: number = parseInt(getISTDateString().slice(0, 4), 10),
+  options?: { asOfMonth?: number; dateOfJoining?: Date | null }
+): Promise<EmployeeLeaveBalanceSnapshot> {
+  const [userRecord, allTypes, existingBalances, activeRequests] = await Promise.all([
+    options?.dateOfJoining !== undefined
+      ? Promise.resolve({ id: userId, dateOfJoining: options.dateOfJoining })
+      : findUserJoiningDate(userId),
     findAllLeaveTypes(false),
     findBalancesForUserYear(userId, year),
     findActiveUserLeaveRequestsForYear(userId, year),
   ]);
 
+  const dateOfJoining = userRecord?.dateOfJoining ?? null;
+  const hasJoiningDate = Boolean(dateOfJoining);
   const balanceMap = new Map(existingBalances.map((b) => [b.leaveTypeId, b]));
   const usedByType = new Map<string, number>();
   const pendingByType = new Map<string, number>();
@@ -82,7 +120,7 @@ export async function getEmployeeLeaveBalances(
     }
   }
 
-  const result: EmployeeLeaveBalanceView[] = [];
+  const balances: EmployeeLeaveBalanceView[] = [];
 
   for (const lt of allTypes) {
     let row = balanceMap.get(lt.id);
@@ -94,7 +132,7 @@ export async function getEmployeeLeaveBalances(
         userId,
         leaveTypeId: lt.id,
         year,
-        entitledDays: lt.defaultAnnualDays,
+        entitledDays: 0,
         carriedForwardDays: 0,
         adjustedDays: 0,
       });
@@ -105,14 +143,16 @@ export async function getEmployeeLeaveBalances(
       continue;
     }
 
-    const entitledDays = row?.entitledDays ?? lt.defaultAnnualDays;
+    const entitledDays = lt.isPaid
+      ? calculateMonthlyAccruedPaidLeaves(dateOfJoining, year, options?.asOfMonth)
+      : 0;
     const carriedForwardDays = row?.carriedForwardDays ?? 0;
     const adjustedDays = row?.adjustedDays ?? 0;
     const totalEntitlement = entitledDays + carriedForwardDays + adjustedDays;
     const remainingDays = Math.max(0, totalEntitlement - usedDays);
     const availableDays = Math.max(0, totalEntitlement - usedDays - pendingDays);
 
-    result.push({
+    balances.push({
       leaveType: lt,
       year,
       entitledDays,
@@ -127,11 +167,23 @@ export async function getEmployeeLeaveBalances(
     });
   }
 
-  return result;
+  return { hasJoiningDate, balances };
 }
 
 /**
- * Allows an Administrator to customize an employee's annual quota or apply manual adjustments.
+ * Returns per-leave-type balances for an employee in the given IST calendar year.
+ */
+export async function getEmployeeLeaveBalances(
+  userId: string,
+  year: number = parseInt(getISTDateString().slice(0, 4), 10),
+  options?: { asOfMonth?: number; dateOfJoining?: Date | null }
+): Promise<EmployeeLeaveBalanceView[]> {
+  const snapshot = await getEmployeeLeaveBalancesWithMeta(userId, year, options);
+  return snapshot.balances;
+}
+
+/**
+ * Allows an Administrator to apply manual balance adjustments (+/- days) and notes.
  */
 export async function adjustEmployeeLeaveBalance(input: {
   userId: string;
@@ -156,12 +208,19 @@ export async function adjustEmployeeLeaveBalance(input: {
     };
   }
 
-  const existing = await findBalance(input.userId, input.leaveTypeId, input.year);
-  const nextEntitled = input.entitledDays ?? existing?.entitledDays ?? leaveType.defaultAnnualDays;
+  const [userRecord, existing] = await Promise.all([
+    findUserJoiningDate(input.userId),
+    findBalance(input.userId, input.leaveTypeId, input.year),
+  ]);
+
+  const accruedDays = leaveType.isPaid
+    ? calculateMonthlyAccruedPaidLeaves(userRecord?.dateOfJoining, input.year)
+    : 0;
+  const nextStoredEntitled = input.entitledDays ?? existing?.entitledDays ?? 0;
   const currentCarried = existing?.carriedForwardDays ?? 0;
   const nextAdjusted = input.adjustedDays ?? existing?.adjustedDays ?? 0;
 
-  if (nextEntitled < 0 || nextEntitled + currentCarried + nextAdjusted < 0) {
+  if (nextStoredEntitled < 0 || accruedDays + currentCarried + nextAdjusted < 0) {
     return {
       success: false,
       error: {
@@ -176,7 +235,7 @@ export async function adjustEmployeeLeaveBalance(input: {
     userId: input.userId,
     leaveTypeId: input.leaveTypeId,
     year: input.year,
-    entitledDays: nextEntitled,
+    entitledDays: nextStoredEntitled,
     carriedForwardDays: currentCarried,
     adjustedDays: nextAdjusted,
     notes: input.notes !== undefined ? input.notes : existing?.notes ?? null,
@@ -186,7 +245,7 @@ export async function adjustEmployeeLeaveBalance(input: {
 }
 
 /**
- * Idempotently rolls unused leave balances from fromYear into toYear.carriedForwardDays,
+ * Idempotently rolls unused leave balances from fromYear (full 12-month accrued total) into toYear.carriedForwardDays,
  * capped by each leave type's maxCarryForwardDays when allowCarryForward is enabled.
  */
 export async function runCarryForwardRollover(
@@ -211,7 +270,10 @@ export async function runCarryForwardRollover(
   const users = await findActiveUsersForBalances(targetUserId);
 
   for (const user of users) {
-    const fromBalances = await getEmployeeLeaveBalances(user.id, fromYear);
+    const fromBalances = await getEmployeeLeaveBalances(user.id, fromYear, {
+      asOfMonth: 12,
+      dateOfJoining: user.dateOfJoining,
+    });
     for (const item of fromBalances) {
       const unused = Math.max(0, item.totalEntitlement - item.usedDays);
       const carried = item.leaveType.allowCarryForward
@@ -222,7 +284,7 @@ export async function runCarryForwardRollover(
         userId: user.id,
         leaveTypeId: item.leaveType.id,
         year: toYear,
-        defaultEntitledDays: item.leaveType.defaultAnnualDays,
+        defaultEntitledDays: 0,
         carriedForwardDays: carried,
       });
     }
@@ -251,7 +313,9 @@ export async function listCompanyLeaveBalances(
   const employees = await Promise.all(
     users.map(async (user) => ({
       user,
-      balances: await getEmployeeLeaveBalances(user.id, year),
+      balances: await getEmployeeLeaveBalances(user.id, year, {
+        dateOfJoining: user.dateOfJoining,
+      }),
     }))
   );
 

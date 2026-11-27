@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { CalendarDays, Clock, CheckCircle2, XCircle, Ban, Loader2 } from 'lucide-react';
+import { CalendarDays, Clock, CheckCircle2, XCircle, Ban, Loader2, AlertCircle } from 'lucide-react';
 import { LeaveTypeItem } from './LeaveRequestModal';
 
 export interface LeaveBalance {
@@ -44,6 +44,7 @@ export interface LeaveRequestItem {
 interface LeaveHistoryListProps {
   requests: LeaveRequestItem[];
   balances: LeaveBalance[];
+  hasJoiningDate?: boolean;
   loading: boolean;
   onRefresh: () => void;
 }
@@ -80,6 +81,7 @@ function getStatusBadge(status: LeaveRequestItem['status']) {
 export function LeaveHistoryList({
   requests,
   balances,
+  hasJoiningDate = true,
   loading,
   onRefresh,
 }: LeaveHistoryListProps) {
@@ -108,6 +110,17 @@ export function LeaveHistoryList({
 
   return (
     <div className="space-y-6">
+      {!loading && !hasJoiningDate && (
+        <div className="flex items-start gap-3 p-4 rounded-xl bg-amber-500/10 border border-amber-400/40 text-xs text-amber-300 font-serif">
+          <AlertCircle className="w-4 h-4 shrink-0 text-[#ffd700] mt-0.5" />
+          <span>
+            Your joining date is not set yet, so Paid Leave accrual is currently{' '}
+            <strong className="font-mono text-[#ffd700]">0</strong> days. Please contact an
+            administrator to add your joining date in CRM.
+          </span>
+        </div>
+      )}
+
       {/* Dynamic Balance Cards */}
       {visibleBalances.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -121,7 +134,7 @@ export function LeaveHistoryList({
                   {b.leaveType.name}
                 </span>
                 <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-amber-400/15 text-[#ffd700] border border-amber-400/30 shrink-0">
-                  {b.leaveType.isPaid ? `${b.entitledDays} / yr` : 'Unpaid'}
+                  {b.leaveType.isPaid ? `${b.entitledDays} accrued` : 'Unpaid'}
                 </span>
               </div>
               <div className="flex items-baseline gap-2">

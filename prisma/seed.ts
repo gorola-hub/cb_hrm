@@ -5,32 +5,12 @@ const prisma = new PrismaClient();
 
 const MASTER_LEAVE_TYPES = [
   {
-    code: 'CASUAL',
-    name: 'Casual Leave',
-    description: 'Personal or urgent time off',
+    code: 'PAID',
+    name: 'Paid Leave',
+    description: 'Monthly accrued paid leave (+1/month after 3-month probation)',
     defaultAnnualDays: 12,
     allowCarryForward: false,
     maxCarryForwardDays: 0,
-    isPaid: true,
-    isActive: true,
-  },
-  {
-    code: 'SICK',
-    name: 'Sick Leave',
-    description: 'Medical and health recovery leave',
-    defaultAnnualDays: 12,
-    allowCarryForward: false,
-    maxCarryForwardDays: 0,
-    isPaid: true,
-    isActive: true,
-  },
-  {
-    code: 'PRIVILEGED',
-    name: 'Privileged Leave',
-    description: 'Planned annual vacation leave with carry-forward',
-    defaultAnnualDays: 15,
-    allowCarryForward: true,
-    maxCarryForwardDays: 10,
     isPaid: true,
     isActive: true,
   },
@@ -128,6 +108,19 @@ async function main() {
     console.log(`  ✓ Leave type seeded: ${leaveType.code} (${leaveType.defaultAnnualDays}d)`);
   }
 
+  // 1c. Remove untouched legacy default leave types (CASUAL, SICK, PRIVILEGED) if no requests reference them
+  const legacyTypes = await prisma.leaveTypeConfig.findMany({
+    where: { code: { in: ['CASUAL', 'SICK', 'PRIVILEGED'] } },
+    include: { _count: { select: { leaveRequests: true } } },
+  });
+  for (const legacy of legacyTypes) {
+    if (legacy._count.leaveRequests === 0) {
+      await prisma.leaveBalance.deleteMany({ where: { leaveTypeId: legacy.id } });
+      await prisma.leaveTypeConfig.delete({ where: { id: legacy.id } });
+      console.log(`  ✓ Removed unused legacy leave type: ${legacy.code}`);
+    }
+  }
+
   // 2. Check Roles (Create default roles only if completely empty / fresh DB)
   let adminRole = await prisma.role.findFirst({ where: { code: 'ADMIN' } });
   if (!adminRole) {
@@ -159,11 +152,15 @@ async function main() {
   if (!existingAdmin) {
     const passwordHash = await bcrypt.hash('Admin123!', 10);
     await prisma.$executeRaw`
-      INSERT INTO "users" ("id", "name", "email", "passwordHash", "roleId", "isActive", "createdAt", "updatedAt")
-      VALUES ('user_admin_dev', 'System Administrator', ${adminEmail}, ${passwordHash}, ${adminRole.id}, true, NOW(), NOW())
+      INSERT INTO "users" ("id", "name", "email", "passwordHash", "roleId", "dateOfJoining", "isActive", "createdAt", "updatedAt")
+      VALUES ('user_admin_dev', 'System Administrator', ${adminEmail}, ${passwordHash}, ${adminRole.id}, '2025-01-01'::timestamp, true, NOW(), NOW())
       ON CONFLICT ("email") DO NOTHING
     `;
     console.log(`  ✓ Created development user: ${adminEmail}`);
+  } else if (!existingAdmin.dateOfJoining) {
+    await prisma.$executeRaw`
+      UPDATE "users" SET "dateOfJoining" = '2025-01-01'::timestamp WHERE "id" = ${existingAdmin.id} AND "dateOfJoining" IS NULL
+    `;
   }
 
   const brokerEmail = 'broker@capitalbridgelogistics.com';
@@ -173,11 +170,15 @@ async function main() {
     const passwordHash = await bcrypt.hash('Broker123!', 10);
     brokerUserId = 'user_broker_dev';
     await prisma.$executeRaw`
-      INSERT INTO "users" ("id", "name", "email", "passwordHash", "roleId", "isActive", "empId", "alias", "createdAt", "updatedAt")
-      VALUES (${brokerUserId}, 'Test Broker', ${brokerEmail}, ${passwordHash}, ${brokerRole.id}, true, 'EMP001', 'BrokerOne', NOW(), NOW())
+      INSERT INTO "users" ("id", "name", "email", "passwordHash", "roleId", "isActive", "empId", "alias", "dateOfJoining", "createdAt", "updatedAt")
+      VALUES (${brokerUserId}, 'Test Broker', ${brokerEmail}, ${passwordHash}, ${brokerRole.id}, true, 'EMP001', 'BrokerOne', '2025-01-01'::timestamp, NOW(), NOW())
       ON CONFLICT ("email") DO NOTHING
     `;
     console.log(`  ✓ Created development user: ${brokerEmail}`);
+  } else if (!existingBroker.dateOfJoining) {
+    await prisma.$executeRaw`
+      UPDATE "users" SET "dateOfJoining" = '2025-01-01'::timestamp WHERE "id" = ${existingBroker.id} AND "dateOfJoining" IS NULL
+    `;
   }
 
   // 4. Assign Default Shift (SHIFT_1900) to Test Broker if not already assigned
@@ -216,7 +217,7 @@ async function main() {
           userId: u.id,
           leaveTypeId: lt.id,
           year: currentYear,
-          entitledDays: lt.defaultAnnualDays,
+          entitledDays: 0,
           carriedForwardDays: 0,
           adjustedDays: 0,
         },

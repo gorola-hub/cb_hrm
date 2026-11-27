@@ -134,8 +134,9 @@ All employee onboarding, role assignment, and access deactivation happens in ONE
 - There are NO rigid limits (e.g., 15-15-30). Breaks can be taken as needed.
 
 ### Step 6: Requesting a Leave
-- Employee navigates to "My Leaves".
-- Selects leave type (Casual, Sick, Planned), dates, and enters a reason.
+- Employee navigates to "My Leaves" (`/leaves`).
+- Company leave uses **Paid Leave (`PAID`)**, accruing **+1 day on the 1st of each eligible month** after a **3-month waiting period** based on CRM joining date (`<= 15th` starts `joiningMonth + 3`; `> 15th` starts `joiningMonth + 4`; if no joining date is set, `/leaves` displays `0` and prompts the employee to contact an Administrator).
+- Employee selects Paid Leave, dates (evaluating accrued balance up to the leave's end-date month), and enters a reason.
 - Submits request -> status shows "Pending Approval".
 - Admin is immediately notified on their portal.
 

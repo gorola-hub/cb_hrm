@@ -14,6 +14,7 @@ import { prisma } from '@/lib/prisma';
 describe('Leave Management & Admin Approval Workflow (TS-LV)', () => {
   let brokerId: string;
   let adminId: string;
+  let originalBrokerDoj: Date | null = null;
 
   beforeEach(async () => {
     const broker = await prisma.user.findFirst({
@@ -29,6 +30,12 @@ describe('Leave Management & Admin Approval Workflow (TS-LV)', () => {
 
     brokerId = broker.id;
     adminId = admin.id;
+    originalBrokerDoj = broker.dateOfJoining ?? null;
+
+    await prisma.user.update({
+      where: { id: brokerId },
+      data: { dateOfJoining: new Date('2025-01-01') },
+    });
 
     await prisma.leaveRequest.deleteMany({
       where: { userId: brokerId },
@@ -45,18 +52,24 @@ describe('Leave Management & Admin Approval Workflow (TS-LV)', () => {
   });
 
   afterAll(async () => {
-    await prisma.leaveRequest.deleteMany({
-      where: { userId: brokerId },
-    });
-    await prisma.leaveBalance.deleteMany({
-      where: { userId: brokerId },
-    });
-    await prisma.breakRecord.deleteMany({
-      where: { attendanceRecord: { userId: brokerId } },
-    });
-    await prisma.attendanceRecord.deleteMany({
-      where: { userId: brokerId },
-    });
+    if (brokerId) {
+      await prisma.leaveRequest.deleteMany({
+        where: { userId: brokerId },
+      });
+      await prisma.leaveBalance.deleteMany({
+        where: { userId: brokerId },
+      });
+      await prisma.breakRecord.deleteMany({
+        where: { attendanceRecord: { userId: brokerId } },
+      });
+      await prisma.attendanceRecord.deleteMany({
+        where: { userId: brokerId },
+      });
+      await prisma.user.update({
+        where: { id: brokerId },
+        data: { dateOfJoining: originalBrokerDoj },
+      });
+    }
     await prisma.$disconnect();
   });
 
@@ -66,9 +79,9 @@ describe('Leave Management & Admin Approval Workflow (TS-LV)', () => {
     expect(calculateWorkingDays('2026-12-05', '2026-12-06')).toBe(0);
   });
 
-  it('TS-LV-001: Submits a valid leave application with status PENDING', async () => {
+  it('TS-LV-001/010: Submits a valid PAID leave application with status PENDING', async () => {
     const result = await submitLeaveRequest(brokerId, {
-      leaveTypeCode: 'CASUAL',
+      leaveTypeCode: 'PAID',
       startDate: '2026-12-05',
       endDate: '2026-12-07',
       reason: 'Family wedding',
@@ -77,7 +90,7 @@ describe('Leave Management & Admin Approval Workflow (TS-LV)', () => {
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.leave.status).toBe('PENDING');
-      expect(result.leave.leaveType.code).toBe('CASUAL');
+      expect(result.leave.leaveType.code).toBe('PAID');
       expect(result.leave.totalDays).toBe(1);
       expect(result.leave.reason).toBe('Family wedding');
     }
@@ -88,7 +101,7 @@ describe('Leave Management & Admin Approval Workflow (TS-LV)', () => {
 
   it('LV_INVALID_DATE_RANGE: Rejects when endDate is earlier than startDate', async () => {
     const result = await submitLeaveRequest(brokerId, {
-      leaveTypeCode: 'SICK',
+      leaveTypeCode: 'PAID',
       startDate: '2026-12-10',
       endDate: '2026-12-08',
       reason: 'Fever',
@@ -103,7 +116,7 @@ describe('Leave Management & Admin Approval Workflow (TS-LV)', () => {
 
   it('LV_EMPTY_REASON: Rejects blank or whitespace-only reason', async () => {
     const result = await submitLeaveRequest(brokerId, {
-      leaveTypeCode: 'CASUAL',
+      leaveTypeCode: 'PAID',
       startDate: '2026-12-08',
       endDate: '2026-12-09',
       reason: '   ',
@@ -118,14 +131,14 @@ describe('Leave Management & Admin Approval Workflow (TS-LV)', () => {
 
   it('TS-LV-002: Rejects overlapping PENDING or APPROVED leave requests', async () => {
     await submitLeaveRequest(brokerId, {
-      leaveTypeCode: 'CASUAL',
+      leaveTypeCode: 'PAID',
       startDate: '2026-12-07',
       endDate: '2026-12-09',
       reason: 'Personal travel',
     });
 
     const overlap = await submitLeaveRequest(brokerId, {
-      leaveTypeCode: 'SICK',
+      leaveTypeCode: 'PAID',
       startDate: '2026-12-08',
       endDate: '2026-12-10',
       reason: 'Medical checkup',
@@ -142,7 +155,7 @@ describe('Leave Management & Admin Approval Workflow (TS-LV)', () => {
 
   it('Allows employee to cancel a PENDING leave and re-apply for those dates', async () => {
     const created = await submitLeaveRequest(brokerId, {
-      leaveTypeCode: 'CASUAL',
+      leaveTypeCode: 'PAID',
       startDate: '2026-12-14',
       endDate: '2026-12-15',
       reason: 'Errand',
@@ -157,7 +170,7 @@ describe('Leave Management & Admin Approval Workflow (TS-LV)', () => {
     }
 
     const reapplied = await submitLeaveRequest(brokerId, {
-      leaveTypeCode: 'PRIVILEGED',
+      leaveTypeCode: 'PAID',
       startDate: '2026-12-14',
       endDate: '2026-12-15',
       reason: 'Planned trip',
@@ -167,7 +180,7 @@ describe('Leave Management & Admin Approval Workflow (TS-LV)', () => {
 
   it('TS-LV-003: Admin approval updates status to APPROVED and auto-marks weekday attendance as LV', async () => {
     const created = await submitLeaveRequest(brokerId, {
-      leaveTypeCode: 'PRIVILEGED',
+      leaveTypeCode: 'PAID',
       startDate: '2026-12-05',
       endDate: '2026-12-09',
       reason: 'Annual vacation',
@@ -193,14 +206,14 @@ describe('Leave Management & Admin Approval Workflow (TS-LV)', () => {
     }
 
     const myLeaves = await getMyLeaves(brokerId, 2026);
-    const privBalance = myLeaves.balances.find((b) => b.leaveType.code === 'PRIVILEGED');
-    expect(privBalance?.usedDays).toBe(3);
-    expect(privBalance?.remainingDays).toBe(12);
+    const paidBalance = myLeaves.balances.find((b) => b.leaveType.code === 'PAID');
+    expect(paidBalance?.usedDays).toBe(3);
+    expect(paidBalance?.remainingDays).toBe((paidBalance?.entitledDays ?? 0) - 3);
   });
 
   it('Admin rejection requires adminNotes and does not mark attendance as LV', async () => {
     const created = await submitLeaveRequest(brokerId, {
-      leaveTypeCode: 'CASUAL',
+      leaveTypeCode: 'PAID',
       startDate: '2026-12-10',
       endDate: '2026-12-10',
       reason: 'Day off',
@@ -234,7 +247,7 @@ describe('Leave Management & Admin Approval Workflow (TS-LV)', () => {
 
   it('Rule BR-LV-002: Punching in on an approved LV date overrides LV to IN_PROGRESS', async () => {
     const created = await submitLeaveRequest(brokerId, {
-      leaveTypeCode: 'CASUAL',
+      leaveTypeCode: 'PAID',
       startDate: '2026-12-07',
       endDate: '2026-12-07',
       reason: 'Tentative appointment',

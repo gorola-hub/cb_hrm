@@ -63,6 +63,7 @@ The central identity and employee profile table managed solely by CRM.
 - `designationId` (String, Nullable, Foreign Key $\rightarrow$ `designations.id`): Assigned company designation.
 - `empId` (String, Nullable, Unique): Company employee ID badge number.
 - `alias` (String, Nullable): Operating broker alias / floor name.
+- `dateOfJoining` (DateTime, Nullable): Employee joining date managed in CRM; read-only in HRM to compute the 3-month probation cutoff and `+1/month` Paid Leave accrual (`0` if `null`).
 - `isActive` (Boolean, Default: `true`): Active status. When `false`, HRM immediately denies login.
 - `createdAt` / `updatedAt` (DateTime): Audit timestamps.
 
@@ -171,10 +172,10 @@ Dynamic master catalog of company leave types managed by Administrators.
 | Column Name | Type | Constraints | Description |
 |---|---|---|---|
 | `id` | String | Primary Key, `@default(cuid())` | Unique leave type ID |
-| `code` | String | Unique, Non-null | Uppercase identifier (e.g., `"CASUAL"`, `"SICK"`, `"PRIVILEGED"`, `"BEREAVEMENT"`) |
-| `name` | String | Non-null | Display name (e.g., `"Casual Leave"`) |
+| `code` | String | Unique, Non-null | Uppercase identifier (default seeded type: `"PAID"`; Admins can add custom types e.g. `"BEREAVEMENT"`) |
+| `name` | String | Non-null | Display name (e.g., `"Paid Leave"`) |
 | `description` | String | Nullable | Policy summary |
-| `defaultAnnualDays` | Float | Non-null, Default: `12` | Default yearly entitlement for newly provisioned employees |
+| `defaultAnnualDays` | Float | Non-null, Default: `12` | Reference annual cap (live Paid Leave entitlement accrues `+1`/month from `users.dateOfJoining`) |
 | `allowCarryForward` | Boolean | Non-null, Default: `false` | Whether unused days roll into the next calendar year |
 | `maxCarryForwardDays` | Float | Non-null, Default: `0` | Cap on days carried forward per year |
 | `isPaid` | Boolean | Non-null, Default: `true` | If `false` (e.g. LWP), requests bypass balance limits |
@@ -192,7 +193,7 @@ Per-employee, per-year, per-leave-type quota and adjustment ledger.
 | `userId` | String | FK $\rightarrow$ `users.id`, `onDelete: Cascade` | Employee ID |
 | `leaveTypeId` | String | FK $\rightarrow$ `hrm_leave_types.id` | Leave type ID |
 | `year` | Integer | Non-null | Calendar year in IST (e.g., `2026`) |
-| `entitledDays` | Float | Non-null | Base or custom annual quota for this employee |
+| `entitledDays` | Float | Non-null | Stored base column (for Paid Leave, live accrued `+1/month` from `dateOfJoining` is computed dynamically at read time) |
 | `carriedForwardDays` | Float | Non-null, Default: `0` | Unused days carried over from `year - 1` |
 | `adjustedDays` | Float | Non-null, Default: `0` | Admin manual +/- adjustment |
 | `notes` | String | Nullable | Reason/context for custom quota or adjustment |
@@ -279,6 +280,7 @@ model User {
   email         String       @unique
   empId         String?      @unique
   alias         String?
+  dateOfJoining DateTime?
   isActive      Boolean      @default(true)
   roleId        String
   role          Role         @relation(fields: [roleId], references: [id])
