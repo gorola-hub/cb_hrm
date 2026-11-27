@@ -104,33 +104,35 @@ export function LeaveHistoryList({
     }
   }
 
+  const visibleBalances = balances.filter((b) => b.leaveType.isActive !== false);
+
   return (
     <div className="space-y-6">
       {/* Dynamic Balance Cards */}
-      {balances.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {balances.map((b) => (
+      {visibleBalances.length > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+          {visibleBalances.map((b) => (
             <div
               key={b.leaveType.id}
-              className="bg-card border border-border rounded-2xl p-5 shadow-lg card-noise space-y-3"
+              className="bg-card border border-border rounded-xl p-4 shadow-sm card-noise flex flex-col justify-between gap-2.5"
             >
               <div className="flex items-center justify-between gap-2">
                 <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground font-serif">
                   {b.leaveType.name}
                 </span>
-                <span className="text-xs font-mono px-2 py-0.5 rounded-full bg-amber-400/15 text-[#ffd700] border border-amber-400/30">
+                <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-amber-400/15 text-[#ffd700] border border-amber-400/30 shrink-0">
                   {b.leaveType.isPaid ? `${b.entitledDays} / yr` : 'Unpaid'}
                 </span>
               </div>
               <div className="flex items-baseline gap-2">
-                <span className="text-3xl font-bold font-mono text-foreground">
+                <span className="text-2xl font-bold font-mono text-foreground">
                   {b.leaveType.isPaid ? b.remainingDays : b.usedDays}
                 </span>
                 <span className="text-xs text-muted-foreground font-serif">
                   {b.leaveType.isPaid ? 'days remaining' : 'days taken'}
                 </span>
               </div>
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground border-t border-border pt-2.5">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground border-t border-border pt-2">
                 <span>
                   Used: <strong className="text-foreground font-mono">{b.usedDays}</strong>
                 </span>
@@ -188,36 +190,36 @@ export function LeaveHistoryList({
             No leave applications submitted yet.
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {requests.map((req) => {
               const badge = getStatusBadge(req.status);
               const StatusIcon = badge.icon;
               return (
                 <div
                   key={req.id}
-                  className="bg-secondary border border-border rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                  className="bg-secondary border border-border rounded-xl p-4 flex flex-col justify-between gap-3"
                 >
                   <div className="space-y-1.5">
-                    <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex items-center justify-between gap-2">
                       <span className="text-sm font-bold text-foreground font-serif">
                         {req.leaveType.name}
                       </span>
                       <span
-                        className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold border ${badge.className}`}
+                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold border shrink-0 ${badge.className}`}
                       >
                         <StatusIcon className="w-3 h-3" />
                         {badge.label}
                       </span>
-                      <span className="text-xs font-mono text-muted-foreground">
-                        {req.startDate === req.endDate
-                          ? req.startDate
-                          : `${req.startDate} → ${req.endDate}`}{' '}
-                        ({req.totalDays} {req.totalDays === 1 ? 'day' : 'days'})
-                      </span>
                     </div>
-                    <p className="text-xs text-muted-foreground">{req.reason}</p>
+                    <div className="text-xs font-mono text-[#ffd700]">
+                      {req.startDate === req.endDate
+                        ? req.startDate
+                        : `${req.startDate} → ${req.endDate}`}{' '}
+                      ({req.totalDays} {req.totalDays === 1 ? 'day' : 'days'})
+                    </div>
+                    <p className="text-xs text-muted-foreground line-clamp-2">{req.reason}</p>
                     {req.adminNotes && (
-                      <p className="text-xs text-foreground/90 bg-card/60 border border-border rounded-lg px-2.5 py-1.5 mt-1">
+                      <p className="text-[11px] text-foreground/90 bg-card/60 border border-border rounded-lg px-2.5 py-1.5 mt-1">
                         <span className="font-semibold text-[#ffd700]">Reviewer Note:</span>{' '}
                         {req.adminNotes}
                         {req.reviewer ? ` — ${req.reviewer.name}` : ''}
@@ -230,7 +232,7 @@ export function LeaveHistoryList({
                       type="button"
                       onClick={() => handleCancel(req.id)}
                       disabled={cancellingId === req.id}
-                      className="self-start sm:self-center shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold bg-card border border-border text-rose-400 hover:bg-rose-500/10 hover:border-rose-500/40 transition cursor-pointer disabled:opacity-50"
+                      className="self-start px-3 py-1.5 rounded-lg text-xs font-semibold bg-card border border-border text-rose-400 hover:bg-rose-500/10 hover:border-rose-500/40 transition cursor-pointer disabled:opacity-50"
                     >
                       {cancellingId === req.id ? 'Cancelling...' : 'Cancel Request'}
                     </button>

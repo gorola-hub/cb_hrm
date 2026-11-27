@@ -159,7 +159,7 @@ describe('Phase 7.5 Leave Management & Dynamic Config UI Components', () => {
   });
 
   describe('LeaveHistoryList (Carry-Forward & Adjustment Display)', () => {
-    it('displays entitled, carry-forward, adjusted, used, and remaining days', () => {
+    it('displays entitled, carry-forward, adjusted, used, and remaining days and hides disabled leave types', () => {
       render(
         <LeaveHistoryList
           requests={[]}
@@ -188,11 +188,34 @@ describe('Phase 7.5 Leave Management & Dynamic Config UI Components', () => {
               availableDays: 17,
               notes: null,
             },
+            {
+              leaveType: {
+                id: 'lt_disabled',
+                code: 'OLD_LEAVE',
+                name: 'Disabled Leave',
+                defaultAnnualDays: 5,
+                allowCarryForward: false,
+                maxCarryForwardDays: 0,
+                isPaid: true,
+                isActive: false,
+              },
+              year: 2026,
+              entitledDays: 5,
+              carriedForwardDays: 0,
+              adjustedDays: 0,
+              totalEntitlement: 5,
+              usedDays: 0,
+              pendingDays: 0,
+              remainingDays: 5,
+              availableDays: 5,
+              notes: null,
+            },
           ]}
         />
       );
 
       expect(screen.getByText('Privileged Leave')).toBeInTheDocument();
+      expect(screen.queryByText('Disabled Leave')).toBeNull();
       expect(screen.getByText('18')).toBeInTheDocument();
       expect(screen.getByText(/\+4/)).toBeInTheDocument();
       expect(screen.getByText(/\+2/)).toBeInTheDocument();

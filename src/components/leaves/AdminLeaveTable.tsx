@@ -160,38 +160,40 @@ export function AdminLeaveTable() {
           No leave requests match this filter.
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
           {requests.map((item) => (
             <div
               key={item.id}
-              className="bg-secondary border border-border rounded-xl p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4"
+              className="bg-secondary border border-border rounded-xl p-4 flex flex-col justify-between gap-3"
             >
               <div className="space-y-1.5">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-bold text-foreground font-serif">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-bold text-foreground font-serif truncate">
                     {item.user.name}
                   </span>
+                  <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-400/15 text-[#ffd700] border border-amber-400/30 shrink-0">
+                    {item.user.role.code}
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5">
                   {item.user.empId && (
                     <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-card border border-border text-muted-foreground">
                       {item.user.empId}
                     </span>
                   )}
-                  <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-400/15 text-[#ffd700] border border-amber-400/30">
-                    {item.user.role.code}
-                  </span>
-                  <span className="text-xs font-bold text-foreground/90">
+                  <span className="text-xs font-mono text-[#ffd700]">
                     {item.leaveType.name} ({item.leaveType.code})
                   </span>
-                  <span className="text-xs font-mono text-muted-foreground">
-                    {item.startDate === item.endDate
-                      ? item.startDate
-                      : `${item.startDate} → ${item.endDate}`}{' '}
-                    ({item.totalDays}d)
-                  </span>
                 </div>
-                <p className="text-xs text-muted-foreground">{item.reason}</p>
+                <div className="text-xs font-mono text-muted-foreground">
+                  {item.startDate === item.endDate
+                    ? item.startDate
+                    : `${item.startDate} → ${item.endDate}`}{' '}
+                  ({item.totalDays}d)
+                </div>
+                <p className="text-xs text-muted-foreground line-clamp-2">{item.reason}</p>
                 {item.adminNotes && (
-                  <p className="text-xs text-foreground/80">
+                  <p className="text-[11px] text-foreground/80">
                     <span className="font-semibold text-[#ffd700]">Admin Note:</span>{' '}
                     {item.adminNotes}
                   </p>
@@ -199,12 +201,12 @@ export function AdminLeaveTable() {
               </div>
 
               {item.status === 'PENDING' ? (
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex items-center gap-2 pt-1">
                   <button
                     type="button"
                     onClick={() => handleApprove(item.id)}
                     disabled={processingId === item.id}
-                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500/30 transition cursor-pointer disabled:opacity-50"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500/30 transition cursor-pointer disabled:opacity-50"
                   >
                     <Check className="w-3.5 h-3.5" />
                     <span>Approve</span>
@@ -216,14 +218,14 @@ export function AdminLeaveTable() {
                       setRejectReason('');
                     }}
                     disabled={processingId === item.id}
-                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-rose-500/20 text-rose-400 border border-rose-500/40 hover:bg-rose-500/30 transition cursor-pointer disabled:opacity-50"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-rose-500/20 text-rose-400 border border-rose-500/40 hover:bg-rose-500/30 transition cursor-pointer disabled:opacity-50"
                   >
                     <X className="w-3.5 h-3.5" />
                     <span>Reject</span>
                   </button>
                 </div>
               ) : (
-                <span className="text-xs font-bold px-3 py-1 rounded-full bg-card border border-border text-muted-foreground self-start lg:self-center">
+                <span className="self-start text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-card border border-border text-muted-foreground">
                   {item.status}
                 </span>
               )}

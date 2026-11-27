@@ -239,20 +239,17 @@ export function AdminLeaveTypesManager() {
             <span>Loading leave types...</span>
           </div>
         ) : (
-          <div className="space-y-2.5">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {leaveTypes.map((lt) => (
               <div
                 key={lt.id}
-                className="bg-secondary border border-border rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                className="bg-secondary border border-border rounded-xl p-4 flex flex-col justify-between gap-3"
               >
-                <div className="space-y-1">
-                  <div className="flex flex-wrap items-center gap-2">
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between gap-2">
                     <span className="text-sm font-bold text-foreground font-serif">{lt.name}</span>
-                    <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-card border border-border text-[#ffd700]">
-                      {lt.code}
-                    </span>
                     <span
-                      className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${
+                      className={`text-[11px] font-bold px-2 py-0.5 rounded-full border shrink-0 ${
                         lt.isActive
                           ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
                           : 'bg-muted text-muted-foreground border-border'
@@ -260,6 +257,9 @@ export function AdminLeaveTypesManager() {
                     >
                       {lt.isActive ? 'Active' : 'Inactive'}
                     </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-mono text-[#ffd700]">{lt.code}</span>
                     <span className="text-[11px] px-2 py-0.5 rounded bg-card border border-border text-muted-foreground">
                       {lt.isPaid ? 'Paid' : 'Unpaid'}
                     </span>
@@ -270,7 +270,7 @@ export function AdminLeaveTypesManager() {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex items-center justify-between gap-2 pt-1">
                   <button
                     type="button"
                     onClick={() => handleToggleActive(lt)}
